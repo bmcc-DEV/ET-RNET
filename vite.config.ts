@@ -20,7 +20,7 @@ export default defineConfig({
   },
 
   build: {
-    target: 'es2022',
+    target: ['es2022', 'firefox103', 'chrome105', 'safari16.4'],
     sourcemap: false,      // Não expõe source em produção
     minify: 'terser',
     terserOptions: {

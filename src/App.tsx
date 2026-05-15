@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { nativeBridge } from "./network/NativeBridge";
 
 // Eager imports — lightweight/above-the-fold
@@ -49,7 +49,38 @@ function LoadingFallback() {
   );
 }
 
+function detectBrowser(): string {
+  const ua = navigator.userAgent;
+  if (ua.includes("Firefox")) return "firefox";
+  if (ua.includes("Safari") && !ua.includes("Chrome")) return "safari";
+  if (ua.includes("Edg")) return "edge";
+  return "chrome";
+}
+
+function BrowserWarning({ browser }: { browser: string }) {
+  if (browser === "chrome" || browser === "edge") return null;
+
+  const limitations: Record<string, string[]> = {
+    firefox: ["Web Bluetooth", "Web Serial"],
+    safari: ["Web Bluetooth", "Web Serial", "Web NFC"],
+  };
+
+  const missing = limitations[browser] || [];
+  if (missing.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 border-t border-yellow-500/30 px-4 py-2 text-xs font-mono text-yellow-400/80 flex items-center gap-2 backdrop-blur-sm">
+      <span className="text-yellow-500">&#9888;</span>
+      <span>
+        Hardware local limitado ({missing.join(", ")}). Use Chrome para acesso completo ao HCN.
+      </span>
+    </div>
+  );
+}
+
 export default function App() {
+  const [browser] = useState(detectBrowser);
+
   useEffect(() => {
     if (nativeBridge.isAvailable()) {
       nativeBridge.activateCarrierService();
@@ -122,6 +153,7 @@ export default function App() {
         </Suspense>
       </main>
       <Footer />
+      <BrowserWarning browser={browser} />
     </div>
   );
 }

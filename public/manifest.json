@@ -3,20 +3,24 @@
   "short_name": "VØID",
   "description": "Protocolos de Próxima Geração para Anonimato, Resiliência e Autonomia Financeira",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#050607",
   "theme_color": "#b6ff3a",
+  "categories": ["privacy", "security", "utilities"],
   "icons": [
     {
       "src": "/icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "/icon-512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
     }
   ]
 }

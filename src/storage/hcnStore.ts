@@ -2,12 +2,14 @@
  * VØID Core — Human Carrier Network (HCN) Storage Engine
  *
  * Banco de dados offline-first robusto usando o Origin Private File System (OPFS)
- * nativo do browser. Gerencia Shards carregados pelos portadores (Carriers).
+ * nativo do browser, com fallback para IndexedDB em browsers sem suporte completo.
+ * Gerencia Shards carregados pelos portadores (Carriers).
  *
  * Características:
  * - Persistência binária e segura em sandbox isolada da CPU/Browser.
  * - TTL (Time-To-Live) de 48 horas gerenciado por varredura automática.
  * - Registro anônimo de créditos de karma para recompensas.
+ * - Fallback IndexedDB para Firefox e browsers sem OPFS completo.
  */
 
 export interface HCNShard {
@@ -24,8 +26,47 @@ export interface KarmaWallet {
   claims:     string[];     // hashes de provas de entrega
 }
 
+const IDB_NAME = "void_hcn_db";
+const IDB_VERSION = 1;
+const IDB_STORE = "shards";
+
+async function openIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: "commitment" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export class HCNStore {
   private static STORAGE_FOLDER = "hcn_shards";
+  private useOPFS: boolean | null = null;
+
+  /**
+   * Detecta se OPFS está disponível (suporte completo com createWritable).
+   */
+  private async checkOPFS(): Promise<boolean> {
+    if (this.useOPFS !== null) return this.useOPFS;
+    try {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle("test_opfs_support", { create: true });
+      const fileHandle = await dir.getFileHandle("test.txt", { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.close();
+      await root.removeEntry("test_opfs_support");
+      this.useOPFS = true;
+    } catch {
+      this.useOPFS = false;
+      console.warn("[HCN Store] OPFS indisponível, usando IndexedDB como fallback.");
+    }
+    return this.useOPFS;
+  }
 
   /**
    * Inicializa o OPFS e cria a estrutura de diretórios se necessário.
@@ -36,53 +77,69 @@ export class HCNStore {
   }
 
   /**
-   * Salva um Shard no OPFS com metadados estruturados.
+   * Salva um Shard no armazenamento (OPFS ou IndexedDB).
    */
   public async storeShard(shard: Omit<HCNShard, "createdAt" | "expiresAt">): Promise<void> {
+    const createdAt = Date.now();
+    const expiresAt = createdAt + 48 * 60 * 60 * 1000;
+    const fullShard: HCNShard = { ...shard, createdAt, expiresAt };
+
     try {
-      const dir = await this.getDirectory();
-      const filename = `${shard.commitment}.json`;
-      const fileHandle = await dir.getFileHandle(filename, { create: true });
-      const writable = await fileHandle.createWritable();
-
-      const createdAt = Date.now();
-      const expiresAt = createdAt + 48 * 60 * 60 * 1000; // 48 Horas TTL
-
-      const fullShard: HCNShard = {
-        ...shard,
-        createdAt,
-        expiresAt,
-      };
-
-      await writable.write(JSON.stringify(fullShard));
-      await writable.close();
-      console.log(`[HCN Store] Shard ${shard.commitment} salvo no OPFS. Expira em 48h.`);
+      if (await this.checkOPFS()) {
+        const dir = await this.getDirectory();
+        const filename = `${shard.commitment}.json`;
+        const fileHandle = await dir.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(fullShard));
+        await writable.close();
+        console.log(`[HCN Store] Shard ${shard.commitment} salvo no OPFS. Expira em 48h.`);
+      } else {
+        const db = await openIDB();
+        const tx = db.transaction(IDB_STORE, "readwrite");
+        tx.objectStore(IDB_STORE).put(fullShard);
+        console.log(`[HCN Store] Shard ${shard.commitment} salvo no IndexedDB (fallback). Expira em 48h.`);
+      }
     } catch (err) {
-      console.error("[HCN Store] Erro ao salvar shard no OPFS:", err);
+      console.error("[HCN Store] Erro ao salvar shard:", err);
       throw err;
     }
   }
 
   /**
    * Retorna todos os Shards válidos (não expirados).
-   * Varre o diretório e descarta registros vencidos.
    */
   public async getValidShards(): Promise<HCNShard[]> {
     const validShards: HCNShard[] = [];
     const now = Date.now();
 
     try {
-      const dir = await this.getDirectory();
-      // @ts-ignore entries() é suportado na especificação OPFS mais recente
-      for await (const [name, handle] of dir.entries()) {
-        if (handle.kind === "file") {
-          const file = await (handle as FileSystemFileHandle).getFile();
-          const text = await file.text();
-          const shard: HCNShard = JSON.parse(text);
-
+      if (await this.checkOPFS()) {
+        const dir = await this.getDirectory();
+        for await (const [name, handle] of (dir as any).entries()) {
+          if (handle.kind === "file") {
+            const file = await (handle as FileSystemFileHandle).getFile();
+            const text = await file.text();
+            const shard: HCNShard = JSON.parse(text);
+            if (shard.expiresAt < now) {
+              await dir.removeEntry(name);
+              console.log(`[HCN Store] Shard expirado ${shard.commitment} limpo via sweeper.`);
+            } else {
+              validShards.push(shard);
+            }
+          }
+        }
+      } else {
+        const db = await openIDB();
+        const tx = db.transaction(IDB_STORE, "readonly");
+        const all: HCNShard[] = await new Promise((res, rej) => {
+          const req = tx.objectStore(IDB_STORE).getAll();
+          req.onsuccess = () => res(req.result);
+          req.onerror = () => rej(req.error);
+        });
+        for (const shard of all) {
           if (shard.expiresAt < now) {
-            // Shard expirou! Deleta fisicamente para liberar espaço
-            await dir.removeEntry(name);
+            const delTx = db.transaction(IDB_STORE, "readwrite");
+            delTx.objectStore(IDB_STORE).delete(shard.commitment);
             console.log(`[HCN Store] Shard expirado ${shard.commitment} limpo via sweeper.`);
           } else {
             validShards.push(shard);
@@ -90,7 +147,7 @@ export class HCNStore {
         }
       }
     } catch (err) {
-      console.error("[HCN Store] Erro ao listar shards no OPFS:", err);
+      console.error("[HCN Store] Erro ao listar shards:", err);
     }
 
     return validShards;
@@ -101,8 +158,14 @@ export class HCNStore {
    */
   public async deleteShard(commitment: string): Promise<void> {
     try {
-      const dir = await this.getDirectory();
-      await dir.removeEntry(`${commitment}.json`);
+      if (await this.checkOPFS()) {
+        const dir = await this.getDirectory();
+        await dir.removeEntry(`${commitment}.json`);
+      } else {
+        const db = await openIDB();
+        const tx = db.transaction(IDB_STORE, "readwrite");
+        tx.objectStore(IDB_STORE).delete(commitment);
+      }
       console.log(`[HCN Store] Shard ${commitment} entregue e removido.`);
     } catch (err) {
       console.warn(`[HCN Store] Shard ${commitment} já foi limpo ou não existe.`, err);
@@ -113,15 +176,14 @@ export class HCNStore {
 
   /**
    * Concede créditos de Karma ao Carrier por fatiar ou entregar shards.
-   * Mantém integridade offline via assinaturas de comprovação.
    */
   public async awardKarma(proofHash: string, amount = 10): Promise<number> {
     try {
       const root = await navigator.storage.getDirectory();
       const karmaHandle = await root.getFileHandle("karma_ledger.json", { create: true });
-      
+
       let wallet: KarmaWallet = { publicKey: "anon_carrier", balance: 0, claims: [] };
-      
+
       try {
         const file = await karmaHandle.getFile();
         const text = await file.text();
@@ -129,7 +191,7 @@ export class HCNStore {
       } catch { /* primeira execução — usar padrão */ }
 
       if (wallet.claims.includes(proofHash)) {
-        return wallet.balance; // Já recompensado
+        return wallet.balance;
       }
 
       wallet.balance += amount;

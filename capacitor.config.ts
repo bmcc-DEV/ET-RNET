@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.void.omega',
+  appId: 'com.etrnet.app',
   appName: 'VØID',
   webDir: 'dist',
   bundledWebRuntime: false,

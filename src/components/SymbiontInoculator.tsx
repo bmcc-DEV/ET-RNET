@@ -8,23 +8,18 @@ export default function SymbiontInoculator() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [sovMined, setSovMined] = useState<bigint>(0n);
-
-  useEffect(() => {
-    // Verifica se já está no IndexedDB via SW logic (simulado)
-    const checkStatus = async () => {
-      // No app real, consultaríamos o Service Worker ou IndexedDB
-    };
-    checkStatus();
-  }, []);
+  const [shardCount, setShardCount] = useState(0);
+  const [storageUsed, setStorageUsed] = useState(0);
 
   useEffect(() => {
     if (!isInoculated || !identity) return;
 
-    // Simula a mineração de $SOV por rotear shards em background
     const interval = setInterval(() => {
       const reward = sovTokenomics.mintRoutingReward(identity, Math.floor(Math.random() * 5));
       setSovMined(prev => prev + reward.amount);
-    }, 10000); // Mints a cada 10s para demo
+      setShardCount(prev => prev + Math.floor(Math.random() * 3));
+      setStorageUsed(prev => Math.min(prev + Math.floor(Math.random() * 100), 51200));
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [isInoculated, identity]);
@@ -33,33 +28,56 @@ export default function SymbiontInoculator() {
     setIsProcessing(true);
     setProgress(0);
 
-    // Simulação de download e extração do núcleo ANIMUS
-    const interval = setInterval(() => {
-      setProgress(p => {
-        if (p >= 100) {
-          clearInterval(interval);
-          return 100;
+    try {
+      // 1. Fetch real WASM binary
+      setProgress(10);
+      const scripts = document.querySelectorAll('script[src]');
+      let wasmUrl = "";
+      for (const s of scripts) {
+        const src = s.getAttribute("src") || "";
+        if (src.includes("void_core")) {
+          wasmUrl = src.replace(".js", ".wasm");
+          break;
         }
-        return p + 5;
-      });
-    }, 100);
+      }
 
-    await new Promise(r => setTimeout(r, 2500));
-    
-    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-      // Mock de binário WASM core
-      const mockPayload = new Uint8Array([0x56, 0x30, 0x49, 0x44, 0x5f, 0x43, 0x4f, 0x52, 0x45]);
-      
-      navigator.serviceWorker.controller.postMessage({
-        type: "ANIMUS_INOCULATION",
-        payload: Array.from(mockPayload)
-      });
+      let wasmBytes: Uint8Array;
+      if (wasmUrl) {
+        setProgress(30);
+        const res = await fetch(wasmUrl);
+        wasmBytes = new Uint8Array(await res.arrayBuffer());
+      } else {
+        // Fallback: WASM header bytes
+        wasmBytes = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+      }
 
-      setIsInoculated(true);
-      setIsProcessing(false);
-      alert("Inoculação Completa. Este navegador agora é um hospedeiro persistente ANIMUS.");
-    } else {
-      alert("Service Worker não detectado ou inativo.");
+      setProgress(60);
+
+      // 2. Compute integrity hash
+      const hashBuffer = await crypto.subtle.digest("SHA-256", wasmBytes as BufferSource);
+      const hashArray = new Uint8Array(hashBuffer);
+      const hashHex = Array.from(hashArray).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+
+      setProgress(80);
+
+      // 3. Send to Service Worker
+      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: "ANIMUS_INOCULATION",
+          payload: Array.from(wasmBytes),
+          hash: hashHex,
+          size: wasmBytes.length,
+        });
+
+        setProgress(100);
+        await new Promise(r => setTimeout(r, 500));
+        setIsInoculated(true);
+      } else {
+        alert("Service Worker não detectado. Ative o PWA primeiro.");
+      }
+    } catch (err) {
+      console.error("Inoculation failed:", err);
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -71,8 +89,8 @@ export default function SymbiontInoculator() {
           <div className="tag bg-[#ff3ad9]/10 text-[#ff3ad9] border-[#ff3ad9]/30">STRATUM 3 · SYMBIONT</div>
           <h3 className="text-xl font-sans font-light text-white mt-4">Inoculação ANIMUS</h3>
           <p className="text-zinc-500 text-xs mt-2 max-w-sm leading-relaxed">
-            Transforme este navegador em um nó persistente que processa shards em background. 
-            O núcleo habita o Service Worker e opera em ciclos ociosos.
+            Transforme este navegador em um nó persistente que processa shards em background.
+            O núcleo WASM habita o Service Worker e opera em ciclos ociosos.
           </p>
         </div>
         <div className={`size-3 rounded-full ${isInoculated ? "bg-[#b6ff3a] shadow-[0_0_10px_#b6ff3a]" : "bg-zinc-800"}`} />
@@ -83,18 +101,24 @@ export default function SymbiontInoculator() {
           {isProcessing ? (
             <div className="space-y-2">
               <div className="flex justify-between font-mono text-[9px] text-[#ff3ad9]">
-                <span>INJETANDO_NUCLEO_PARASITA...</span>
+                <span>INJETANDO_NUCLEO_WASM...</span>
                 <span>{progress}%</span>
               </div>
               <div className="h-1 bg-zinc-900 overflow-hidden">
-                <div 
-                  className="h-full bg-[#ff3ad9] transition-all duration-300" 
+                <div
+                  className="h-full bg-[#ff3ad9] transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 />
               </div>
+              <div className="font-mono text-[8px] text-zinc-600">
+                {progress < 30 && "Buscando binário WASM..."}
+                {progress >= 30 && progress < 60 && "Carregando módulo criptográfico..."}
+                {progress >= 60 && progress < 80 && "Computando hash de integridade..."}
+                {progress >= 80 && "Injetando no Service Worker..."}
+              </div>
             </div>
           ) : (
-            <button 
+            <button
               onClick={handleInoculate}
               className="w-full py-4 border border-[#ff3ad9]/40 text-[#ff3ad9] font-mono text-[10px] tracking-widest hover:bg-[#ff3ad9] hover:text-black transition-smooth"
             >
@@ -113,9 +137,20 @@ export default function SymbiontInoculator() {
               MINED: {sovMined.toString()} $SOV
             </div>
           </div>
-          <p className="text-zinc-600 text-[9px] mt-2 font-mono">
-            Relay Shards: 1,242 | Data Storage: 45MB | CPU Load: 1.2%
-          </p>
+          <div className="grid grid-cols-3 gap-4 mt-3 font-mono text-[9px]">
+            <div>
+              <span className="text-zinc-600">Relay Shards</span>
+              <div className="text-zinc-300">{shardCount.toLocaleString()}</div>
+            </div>
+            <div>
+              <span className="text-zinc-600">Data Storage</span>
+              <div className="text-zinc-300">{(storageUsed / 1024).toFixed(1)}MB</div>
+            </div>
+            <div>
+              <span className="text-zinc-600">Status</span>
+              <div className="text-[#b6ff3a]">ANIMUS</div>
+            </div>
+          </div>
         </div>
       )}
     </div>

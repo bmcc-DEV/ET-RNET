@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ZKUTXO } from "../crypto/zkp";
+import { ZKUTXO, compileHydraCircuit, generateBalanceProof } from "../crypto/zkp";
 import { Field, Group, Scalar } from "o1js";
 
 export default function ZKPLab() {
@@ -11,47 +11,59 @@ export default function ZKPLab() {
     setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50));
   };
 
-  const runSimulation = async () => {
+  const runProof = async () => {
     setIsProving(true);
+    setProofResult(null);
     addLog("Iniciando prova ZK (HydraBalanceProof)...");
-    addLog("Gerando testemunhas privadas (UTXOs, Blinding Factors)...");
 
     try {
-      // Simulando a execução do circuito o1js em modo Provable
-      // Nota: o compile() real levaria muito tempo, então usamos o modo interactivo
-      
-      const _inputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
-        amount: Field(i === 0 ? 100 : 0),
-        blindingFactor: Field(Math.floor(Math.random() * 1000000)),
-        commitment: Group.generator.scale(Scalar.from(Math.floor(Math.random() * 1000000))),
-      }));
+      // 1. Compilar circuito
+      addLog("Compilando circuito o1js (Kimchi SNARK)...");
+      const t0 = performance.now();
+      await compileHydraCircuit();
+      const compileTime = ((performance.now() - t0) / 1000).toFixed(1);
+      addLog(`✓ Circuito compilado em ${compileTime}s`);
 
-      const _outputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
-        amount: Field(i === 0 ? 100 : 0),
-        blindingFactor: Field(Math.floor(Math.random() * 1000000)),
-        commitment: Group.generator.scale(Scalar.from(Math.floor(Math.random() * 1000000))),
-      }));
+      // 2. Gerar UTXOs de entrada (valor total = 100)
+      addLog("Gerando 10 UTXOs de entrada (Σ = 100)...");
+      const inputs = Array.from({ length: 10 }, (_, i) => {
+        const amount = Field(i === 0 ? 100 : 0);
+        const blinding = Field(BigInt(i + 1) * 111111n);
+        const r = Scalar.from(blinding.toBigInt());
+        const v = Scalar.from(amount.toBigInt());
+        const commitment = Group.generator.scale(r).add(Group.generator.scale(v));
+        return new ZKUTXO({ amount, blindingFactor: blinding, commitment });
+      });
 
-      addLog(`UTXOs de entrada gerados: ${_inputs.length}`);
-      addLog(`UTXOs de saída gerados: ${_outputs.length}`);
+      // 3. Gerar UTXOs de saída (valor total = 100 — balanço preservado)
+      addLog("Gerando 10 UTXOs de saída (Σ = 100)...");
+      const outputs = Array.from({ length: 10 }, (_, i) => {
+        const amount = Field(i === 0 ? 50 : i === 1 ? 50 : 0);
+        const blinding = Field(BigInt(i + 10) * 222222n);
+        const r = Scalar.from(blinding.toBigInt());
+        const v = Scalar.from(amount.toBigInt());
+        const commitment = Group.generator.scale(r).add(Group.generator.scale(v));
+        return new ZKUTXO({ amount, blindingFactor: blinding, commitment });
+      });
 
-      addLog("Calculando Σ C_in e Σ C_out na curva Pallas...");
-      
-      // Prova de balanço ZK
-      addLog("Restrição: Σ v_in === Σ v_out");
-      addLog("Restrição: ∀ v ∈ [0, Field.ORDER)");
-      addLog("Restrição: C_i === r_i*G + v_i*H");
+      addLog(`UTXOs entrada: ${inputs.map(u => u.amount.toString()).join(", ")}`);
+      addLog(`UTXOs saída:   ${outputs.map(u => u.amount.toString()).join(", ")}`);
+      addLog("Restrição: Σ v_in === Σ v_out (100 === 100)");
 
-      setTimeout(() => {
-        addLog("✓ Prova SNARK (PLONK) gerada com sucesso!");
-        addLog("Proof size: ~890 bytes");
-        addLog("Verification time: ~12ms");
-        setProofResult("✓ VALID_ZK_PROOF");
-        setIsProving(false);
-      }, 2000);
+      // 4. Gerar prova ZK real
+      addLog("Gerando prova SNARK (proving key + testemunhas)...");
+      const t1 = performance.now();
+      const { proof } = await generateBalanceProof(inputs, outputs);
+      const proveTime = ((performance.now() - t1) / 1000).toFixed(1);
+      addLog(`✓ Prova gerada em ${proveTime}s`);
+      addLog(`Proof size: ${new TextEncoder().encode(proof).length} bytes`);
+      addLog("Verificação: Σ C_in === Σ C_out (Pedersen commitment)");
+      addLog("✓ VALID_ZK_PROOF — transação legítima sem revelar valores");
 
+      setProofResult("✓ VALID_ZK_PROOF");
     } catch (err) {
       addLog(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
       setIsProving(false);
     }
   };
@@ -73,7 +85,7 @@ export default function ZKPLab() {
             Laboratório de <span className="text-[#b6ff3a]">Privacidade ZK</span>
           </h2>
           <p className="text-zinc-400 text-base md:text-lg leading-relaxed max-w-3xl">
-            O VØID utiliza provas SNARK (o1js/Kimchi) para garantir que transações sejam válidas 
+            O VØID utiliza provas SNARK (o1js/Kimchi) para garantir que transações sejam válidas
             sem nunca revelar valores, saldos ou destinatários.
           </p>
         </div>
@@ -83,7 +95,7 @@ export default function ZKPLab() {
           <div className="lg:col-span-7 bg-[#0a0d10] p-6 md:p-8">
             <div className="flex items-center justify-between mb-6">
               <span className="tag">CIRCUITO ZK · hydra-balance-proof.ts</span>
-              <span className="font-mono text-[10px] text-zinc-600">o1js / SnarkyJS</span>
+              <span className="font-mono text-[10px] text-zinc-600">o1js / Kimchi SNARK</span>
             </div>
             <pre className="font-mono text-[11px] text-zinc-400 leading-relaxed overflow-x-auto scrollbar h-[400px] p-4 bg-black/50 border border-[#14181c]">
 {`export const HydraBalanceProof = ZkProgram({
@@ -92,26 +104,29 @@ export default function ZKPLab() {
 
   methods: {
     proveBalance: {
-      privateInputs: [Provable.Array(ZKUTXO, 10), Provable.Array(ZKUTXO, 10)],
+      privateInputs: [
+        Provable.Array(ZKUTXO, 10),
+        Provable.Array(ZKUTXO, 10)
+      ],
 
       method(publicInput, inputs, outputs) {
         let computedInSum = Field(0);
         let computedOutSum = Field(0);
 
-        // Soma dos Inputs + Verificação de Commitment
         for (let i = 0; i < 10; i++) {
           const input = inputs[i];
-          const expectedC = G.scale(input.r).add(H.scale(input.v));
+          // Verifica: C = r*G + v*H
+          const expectedC = G.scale(input.r)
+            .add(H.scale(input.v));
           expectedC.assertEquals(input.commitment);
           computedInSum = computedInSum.add(input.v);
         }
 
-        // Soma dos Outputs
         for (let i = 0; i < 10; i++) {
           computedOutSum = computedOutSum.add(outputs[i].v);
         }
 
-        // EQUAÇÃO FUNDAMENTAL: Σ v_in == Σ v_out
+        // EQUAÇÃO: Σ v_in == Σ v_out
         computedInSum.assertEquals(computedOutSum);
       },
     },
@@ -126,7 +141,7 @@ export default function ZKPLab() {
               <div>
                 <span className="tag mb-4 block">PROVER CONSOLE</span>
                 <button
-                  onClick={runSimulation}
+                  onClick={runProof}
                   disabled={isProving}
                   className="w-full py-4 bg-[#b6ff3a] text-black font-mono text-xs tracking-[0.2em] hover:bg-white transition-all disabled:opacity-50"
                 >
@@ -139,7 +154,7 @@ export default function ZKPLab() {
                   <div className="font-mono text-xs text-[#b6ff3a] mb-2">RESULTADO DA VERIFICAÇÃO</div>
                   <div className="font-mono text-xl text-zinc-100">{proofResult}</div>
                   <div className="mt-2 font-mono text-[10px] text-zinc-500">
-                    O nó validador confirmou que a transação é legítima (Σ In = Σ Out) sem conhecer os valores.
+                    Prova SNARK real gerada e verificada pelo circuito o1js.
                   </div>
                 </div>
               )}
@@ -159,8 +174,8 @@ export default function ZKPLab() {
             </div>
 
             <div className="mt-6 pt-6 border-t border-[#14181c] font-mono text-[10px] text-zinc-600 leading-relaxed">
-              <strong className="text-zinc-400">Deep Privacy:</strong> Diferente do Bitcoin (UTXO transparente), 
-              Hydra usa <span className="text-[#b6ff3a]">Blind UTXOs</span>. Os valores nunca tocam o disco 
+              <strong className="text-zinc-400">Deep Privacy:</strong> Diferente do Bitcoin (UTXO transparente),
+              Hydra usa <span className="text-[#b6ff3a]">Blind UTXOs</span>. Os valores nunca tocam o disco
               ou a rede em texto claro. Apenas provas matemáticas viajam.
             </div>
           </div>

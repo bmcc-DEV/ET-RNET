@@ -96,3 +96,50 @@ export const HydraBalanceProof = ZkProgram({
 
 // Tipagem para exportação
 export type HydraProof = typeof HydraBalanceProof;
+
+// ─── Compile & Prove Wrappers ────────────────────────────────────────────────
+
+let compiled = false;
+
+/**
+ * Compila o circuito ZK (pode levar 30-60s na primeira vez).
+ */
+export async function compileHydraCircuit(): Promise<void> {
+  if (compiled) return;
+  await HydraBalanceProof.compile();
+  compiled = true;
+}
+
+/**
+ * Gera uma prova ZK real de balanço de transação.
+ */
+export async function generateBalanceProof(
+  inputs: ZKUTXO[],
+  outputs: ZKUTXO[],
+): Promise<{ proof: string; publicInput: ZKTransactionProof }> {
+  await compileHydraCircuit();
+
+  let inputCommitmentSum = Group.zero;
+  let outputCommitmentSum = Group.zero;
+  for (const u of inputs) inputCommitmentSum = inputCommitmentSum.add(u.commitment);
+  for (const u of outputs) outputCommitmentSum = outputCommitmentSum.add(u.commitment);
+
+  const publicInput = new ZKTransactionProof({
+    inputCommitmentSum,
+    outputCommitmentSum,
+  });
+
+  const result = await HydraBalanceProof.proveBalance(publicInput, inputs, outputs);
+  const proofStr = JSON.stringify(result.proof);
+  return { proof: proofStr, publicInput };
+}
+
+/**
+ * Verifica uma prova ZK (placeholder — o1js verify requer instância de prova).
+ */
+export async function verifyBalanceProof(_proofJson: string): Promise<boolean> {
+  await compileHydraCircuit();
+  // A verificação real requer a instância de prova do o1js
+  // Por enquanto, retorna true se o circuito compilou
+  return true;
+}

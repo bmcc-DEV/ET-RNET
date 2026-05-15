@@ -58,8 +58,40 @@ self.addEventListener("message", (event) => {
 self.addEventListener("periodicsync", (event) => {
   if (event.tag === "void-mesh-sync") {
     console.log("[ANIMUS SW] Sincronização periódica da mesh iniciada em background.");
-    // Aqui rodaria a lógica de GossipSub simplificada
+    relayShardsInBackground();
   }
+});
+
+// Local peer discovery via BroadcastChannel (cross-tab mesh)
+let discoveredPeers = [];
+const meshChannel = new BroadcastChannel("void_sw_mesh");
+meshChannel.onmessage = (e) => {
+  if (e.data?.type === "PEER_ANNOUNCE" && e.data.peerId) {
+    if (!discoveredPeers.find(p => p.id === e.data.peerId)) {
+      discoveredPeers.push({ id: e.data.peerId, lastSeen: Date.now() });
+    }
+  }
+};
+
+async function relayShardsInBackground() {
+  const shards = await getAllShardsFromDB();
+  if (shards.length === 0) return;
+
+  // Relay shards to peers via BroadcastChannel
+  const unrelayed = shards.filter(s => !s.relayed);
+  if (unrelayed.length > 0) {
+    meshChannel.postMessage({
+      type: "SHARD_RELAY",
+      shards: unrelayed.map(s => ({ id: s.id, commitment: s.commitment, data: s.data })),
+      count: unrelayed.length,
+    });
+    console.log(`[ANIMUS SW] Relayed ${unrelayed.length} shards via BroadcastChannel`);
+  }
+}
+
+self.addEventListener("push", (event) => {
+  console.log("[ANIMUS SW] Push received. Keeping node alive.");
+  // Mantém o service worker aquecido para processamento da mesh
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);

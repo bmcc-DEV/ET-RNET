@@ -1,0 +1,28 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.void.omega'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.void.omega"
+        minSdk 22
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation project(':capacitor-android')
+}

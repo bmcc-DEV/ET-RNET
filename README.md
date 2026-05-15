@@ -1,120 +1,91 @@
 # ETΞRNET
 
-> "Where money becomes invisible, control becomes impossible."
+> Privacy-first financial infrastructure. No servers. No identity. No trace.
 
-A privacy-first decentralized ecosystem built as a PWA with a Rust/WASM cryptographic core. The browser becomes a sovereign node capable of phantom communication, physical asset tokenization, and anonymous financial settlement.
+## What is this?
 
----
+ETΞRNET is a decentralized privacy stack combining post-quantum cryptography, zero-knowledge proofs, and offline-first mesh networking into a single browser-based platform.
 
-## Architecture — 7 Layers
+## Architecture (7 Layers)
 
-| Layer | Name | Description |
-|-------|------|-------------|
-| 0 | **Social Fabric** | P2P messaging fragmented via QEL (Shamir SSS + ChaCha20-Poly1305) |
-| 1 | **RWA Tokenization** | Physical asset tokenization with mesh witness protocol + Ed25519 attestations |
-| 2 | **DEX (Chimera Exchange)** | Blind matching engine with VRF-elected matcher rounds |
-| 3 | **ANIMUS** | Persistent background execution via Service Workers + steganographic persistence |
-| 4 | **Stablecoin Local** | Credit Vaults for $ETBRL, $ETARS, $ETUSD with 150% collateralization |
-| 5 | **P2P Fiat Ramp** | Blind Karma Tokens with Pedersen commitments + epoch rotation |
-| 6 | **HGPU** | Homotopic Geometrical Stream rendering via WebGL SDF raymarching |
+| Layer | Module | Description |
+|-------|--------|-------------|
+| 0 - Identity | `ghostid.ts` | Ephemeral identities from biometric entropy + WASM |
+| 1 - Fragmentation | `qel.ts` | Shamir Secret Sharing (K=2, N=3) + ChaCha20-Poly1305 |
+| 2 - Transport | `distanceBridge.ts` | BLE, LoRa, Acoustic FSK, Nostr/WebRTC |
+| 3 - Financial | `utxo.ts` | UTXO model with Pedersen Commitments |
+| 4 - Consensus | `zkp.ts` | Zero-knowledge proofs via o1js |
+| 5 - Cryptographic | `pqc.ts` | ML-KEM-1024 + ML-DSA-87 (post-quantum) |
+| 6 - Quantum | `quantum/` | CQR Engine (quimb) + BB84 QKD |
 
-## Tech Stack
+## Modules (28 crypto + 5 network)
 
-- **Frontend:** React 19 + TypeScript + Tailwind CSS + Vite
-- **Crypto Core:** Rust/WASM (`void_core`) — Pedersen Commitments, Bulletproofs, Ed25519, Blake3
-- **Crypto Libraries:** @noble/hashes, @noble/ciphers, @noble/curves, @noble/post-quantum
-- **ZK Circuits:** o1js (Mina Protocol)
-- **Network:** Nostr + WebRTC P2P, Web Bluetooth, Web NFC, LoRa (Web Serial), Acoustic FSK
-- **Storage:** OPFS (shards), Dexie/IndexedDB (UTXOs), Service Worker cache
-- **Mobile:** Capacitor (Android)
+### Crypto
+`qel` `utxo` `pqc` `ghostid` `karmaSystem` `chimeraExchange` `doubleSpendDefense` `ghostvpn` `aegisVault` `phantomShopper` `janusFinance` `sovereignPools` `stablecoin` `rwaTokenization` `signingKeys` `mirageCompute` `zkp` `quantumBridge`
 
-## Crypto Modules
+### Network
+`acousticDriver` (18-20kHz FSK) | `loraDriver` (AT commands) | `nostrMesh` (NIP-04 + WebRTC) | `localDrivers` (BLE/NFC/Serial) | `NativeBridge` (Capacitor)
 
-| Module | Status | Description |
-|--------|--------|-------------|
-| `gf256.ts` | Production | GF(256) Galois Field arithmetic (shared) |
-| `qel.ts` | Production | QEL Protocol — Shamir K=2/N=3 + ChaCha20-Poly1305 |
-| `cryptoTestament.ts` | Production | Shamir K=3/N=5 + Argon2id + dead man's switch |
-| `pqc.ts` | Production | Post-quantum: ML-KEM-1024 (Kyber) + ML-DSA-87 (Dilithium) |
-| `antiSybil.ts` | Production | PoW hashcash + VDF + token bucket rate limiting |
-| `matchmaker.ts` | Production | Blind order fragmentation + commit-reveal matching |
-| `sphinx.ts` | Production | Onion-routed Sphinx packets + ChaCha20-Poly1305 |
-| `temporalOracle.ts` | Production | Time-locked intents + Ed25519 + delta-neutral hedges |
-| `ghostvpn.ts` | Production | 7-layer VPN with QEL fragmentation + MAC rotation |
-| `econet.ts` | Production | Decaying DHT with fossilization + forgetting proofs |
-| `aegisVault.ts` | Production | Entropy convergence vault + ChaCha20-Poly1305 |
-| `utxo.ts` | Production | Pedersen commitments (Ed25519) + balance proofs + Bulletproofs |
-| `karmaSystem.ts` | Production | Blind Karma Tokens with Pedersen + epoch rotation |
-| `chimeraExchange.ts` | Production | VRF-elected matcher rounds + liquidity pools |
-| `sovereignPools.ts` | Production | Governance pools + ZK voting with nullifiers |
-| `janusFinance.ts` | Production | UTXO-based neobank + virtual cards + PIX |
-| `phantomShopper.ts` | Production | Anonymous purchase flow + live exchange rates |
-| `stablecoin.ts` | Production | Credit Vaults + P2P fiat ramp |
-| `supplyChain.ts` | Production | Provenance registry + community kill switch |
-| `sovTokenomics.ts` | Production | Adaptive difficulty + staking + network telemetry |
-| `ghostid.ts` | Production | Ed25519 key derivation via WASM |
-| `doubleSpendDefense.ts` | Production | Inline WASM + GF(256) algebra + slashing |
-| `rwaTokenization.ts` | Production | Asset tokenization + fractionalization + Ed25519 witnesses |
-| `mirageCompute.ts` | Production | Code fragmentation + WebAssembly enclave execution |
-| `signingKeys.ts` | Production | Node signing key derivation (HKDF-SHA3-512) |
-| `zkp.ts` | Production | o1js ZK circuit (HydraBalanceProof) |
-
-## Network Drivers
-
-| Driver | Protocol | Status |
-|--------|----------|--------|
-| NostrMesh | NIP-04 + WebRTC | Production |
-| BluetoothDriver | Web Bluetooth GATT | Production |
-| NFCDriver | Web NFC (NDEFReader) | Production |
-| SerialUWBDriver | Web Serial API | Production |
-| LoRaDriver | AT commands (Reyax/Ebyte) | Production |
-| AcousticDriver | Ultrasonic FSK (18.5/19.5 kHz) | Production |
+### Storage
+`hcnStore` (OPFS + IndexedDB, 48h TTL) | `utxoStore` (Dexie ORM)
 
 ## Quick Start
 
 ```bash
+# Install
 npm install
-npm run dev        # Launch local sovereign node
-npm run build      # Production build (355 KB main bundle)
+
+# Dev server
+npm run dev
+
+# Build
+npm run build
+
+# Android APK
+cd android && ./gradlew assembleDebug
+
+# Quantum backend (optional)
+cd quantum
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python server.py
+# API docs: http://localhost:8472/docs
 ```
 
-## Build Output
+## Quantum Backend
 
-```
-dist/
-  index.html                    1.6 KB
-  assets/void_core_bg.wasm    266 KB (gzip: 103 KB)
-  assets/index.css             60 KB (gzip: 11 KB)
-  assets/vendor-react.js      11 KB (gzip: 4 KB)
-  assets/index.js            355 KB (gzip: 116 KB)
-  + 32 lazy-loaded chunks (crypto modules)
-```
+Real quantum computing via Python + quimb tensor networks:
 
-## Project Structure
+- **CQR Engine:** Bell states, CHSH test (S=2√2), Pachner moves
+- **BB84 QKD:** Full protocol with sifting, QBER check, privacy amplification
+- **QRNG:** Quantum random numbers from Bell state measurements
 
-```
-src/
-  crypto/          26 modules — cryptographic primitives + protocols
-  components/      43 components (28 lazy-loaded)
-  network/         5 drivers — BLE, NFC, UWB, LoRa, acoustic
-  core/            VoidOrchestrator + PowerGovernor
-  storage/         OPFS + IndexedDB persistence
-  omega/           Steganography + deep research
-  social/          P2P messaging (E2EE)
-  paleo/           Binary archaeology engine
-
-void_core/         Rust/WASM — Pedersen, Bulletproofs, Ed25519, Blake3
-public/            Service Worker + PWA manifest
+```python
+from quantum.cqr_engine import CQREngine
+engine = CQREngine()
+pair = engine.create_entangled_pair("phi_plus")
+print(f"CHSH S = {pair['chsh']['S_value']:.3f}")  # 2.828
 ```
 
-## Security
+## Browser Support
 
-- **Zero-Disk Policy:** RAM-only with 48h TTL auto-sweep
-- **Post-Quantum Ready:** ML-KEM-1024 + ML-DSA-87 hybrid encryption
-- **E2EE by Default:** All DMs encrypted with ChaCha20-Poly1305
-- **Blind Signatures:** Karma tokens use Pedersen commitments
-- **No Hardcoded Keys:** All signing keys derived per-node via HKDF
+| Browser | Status |
+|---------|--------|
+| Chrome/Edge | Full (BLE, Serial, NFC) |
+| Firefox | Core features (no BLE/Serial) |
+| Safari | Core features (no BLE/Serial/NFC) |
+| Android WebView | Full (Capacitor APK) |
+
+## Tech Stack
+
+- React 19 + TypeScript + Vite + Tailwind CSS
+- Rust/WASM crypto core (`void_core`)
+- Noble libraries (curves, hashes, ciphers, post-quantum)
+- o1js (ZK proofs)
+- Dexie (IndexedDB)
+- Capacitor (Android)
+- Python/quimb (quantum backend)
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+Research purposes only.

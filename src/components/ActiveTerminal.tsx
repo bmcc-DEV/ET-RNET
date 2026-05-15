@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
+import { QRCodeSVG } from "../utils/qr";
 import {
   type SpawnProgress,
 } from "../crypto/ghostid";
@@ -806,12 +807,7 @@ export default function ActiveTerminal() {
                     {qrCodeData && (
                       <div className="mt-4 flex flex-col items-center justify-center p-3 border border-[#14181c] bg-black">
                         <div className="size-24 border border-[#6cf0ff]/30 bg-[#6cf0ff]/5 flex items-center justify-center relative">
-                          {/* mock qr blocks */}
-                          <div className="grid grid-cols-4 gap-1 size-16 opacity-70">
-                            {[...Array(16)].map((_, i) => (
-                              <div key={i} className={`size-3 ${i % 3 === 0 ? "bg-[#6cf0ff]" : "bg-transparent border border-[#6cf0ff]/20"}`} />
-                            ))}
-                          </div>
+                          <QRCodeSVG value={qrCodeData} size={80} fgColor="#6cf0ff" bgColor="transparent" />
                         </div>
                         <span className="font-mono text-[9px] text-zinc-500 mt-2">QR PROOF EMITIDO</span>
                       </div>

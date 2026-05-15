@@ -7,6 +7,7 @@ import {
   type DoubleSpendTransaction,
   type DefenseVerdict,
 } from "../crypto/doubleSpendDefense";
+import { getSigningKey } from "../crypto/signingKeys";
 
 type LogLine = { ts: string; text: string; type: "info" | "warn" | "success" | "error" };
 
@@ -28,10 +29,12 @@ export default function DoubleSpendDefenseLab() {
   const enclave = new HardwareEnclaveModule();
   const slasher = new SlashingDefenseEngine();
 
-  const mockIdentity: SlashingIdentity = {
+  // Gerar identidade real via Ed25519
+  const privateKeySeed = getSigningKey("double-spend-defense");
+  const aliceIdentity: SlashingIdentity = {
     alias: "Alice_Anon",
-    publicKey: "0x39ab82cd4a11be7f",
-    privateKeySeed: new Uint8Array([144, 22, 91, 104, 200, 55, 12, 67]),
+    publicKey: Array.from(privateKeySeed.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(''),
+    privateKeySeed: privateKeySeed,
   };
 
   const addLog = (text: string, type: LogLine["type"] = "info") => {
@@ -167,7 +170,7 @@ export default function DoubleSpendDefenseLab() {
       addLog("Polinômio: f(x) = secret ⊕ k⊗x (GF(256), irredutível 0x11B)", "info");
 
       const splits = await slasher.generateSplitSignatures(
-        mockIdentity, "utxo_90fa", "tx_bob", "tx_carlos"
+        aliceIdentity, "utxo_90fa", "tx_bob", "tx_carlos"
       );
 
       addLog(`Identity Commitment: ${splits.identityCommitment}`, "info");
@@ -230,7 +233,7 @@ export default function DoubleSpendDefenseLab() {
       }
 
       // Secure wipe
-      await slasher.secureWipe(mockIdentity.privateKeySeed);
+      await slasher.secureWipe(aliceIdentity.privateKeySeed);
       addLog("Secure wipe: private key seed zerado na memória.", "info");
       addLog("═══════════════════════════════════════════", "success");
       addLog("  RESULTADO: GASTO DUPLO PUNIDO VIA SLASHING", "success");

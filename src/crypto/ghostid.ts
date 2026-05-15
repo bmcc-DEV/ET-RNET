@@ -1,7 +1,7 @@
 import init, { derive_ghost_id, init_void_core } from "void_core";
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { argon2id } from "@noble/hashes/argon2.js";
-import { vhgpuQRNG } from "./cqrEmulator";
+import { generateQuantumEntropy } from "./quantumBridge";
 
 // --- Types ---
 export interface GhostIdentity {
@@ -45,7 +45,7 @@ export async function collectBiometricEntropy(): Promise<BiometricEntropy> {
   
   // 1. KEYSTROKE DYNAMICS — Monitora intervalo entre keys
   let lastKeyTime = 0;
-  const keyListener = (e: KeyboardEvent) => {
+  const keyListener = (_e: KeyboardEvent) => {
     const now = performance.now();
     if (lastKeyTime > 0) {
       keystrokeDynamics.push((now - lastKeyTime) | 0);
@@ -74,7 +74,7 @@ export async function collectBiometricEntropy(): Promise<BiometricEntropy> {
   try {
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } });
-    const source = audioCtx.createMediaStreamAudioSource(stream);
+    const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
@@ -122,16 +122,19 @@ export async function spawnGhostId(
 
   if (onProgress) onProgress({ stage: "vhgpu", detail: "Coletando QRNG via vHGPU (renderização geométrica)...", elapsed: performance.now() - t0 });
   
-  // Generate quantum entropy via vHGPU (true randomness from SDF rendering)
+  // Generate quantum entropy via CQR engine (Bell state measurements)
   let quantumEntropy: Uint8Array;
   let quantumVerified = false;
-  
+
   try {
-    quantumEntropy = await vhgpuQRNG(32);
+    const qrngResult = await generateQuantumEntropy(256);
+    quantumEntropy = new Uint8Array(
+      qrngResult.entropy_hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16))
+    );
     quantumVerified = true;
-    console.log("[GhostID] vHGPU QRNG obtido com sucesso");
+    console.log("[GhostID] CQR QRNG obtido via Bell states");
   } catch (e) {
-    console.warn("[GhostID] vHGPU indisponível, usando biometria completa");
+    console.warn("[GhostID] CQR engine indisponível, usando CSPRNG");
     quantumEntropy = new Uint8Array(32);
     crypto.getRandomValues(quantumEntropy);
   }
@@ -168,12 +171,10 @@ export async function spawnGhostId(
   if (onProgress) onProgress({ stage: "argon2id", detail: "Aplicando Argon2id (64MB, 3 iter)...", elapsed: performance.now() - t0 });
   
   // Derive with Argon2id (64MB memory, 3 iterations, parallelism 1)
-  const derivedEntropy = await argon2id({
-    password: entropy,
-    salt: sha3_256(entropy),
-    time: 3,
-    mem: 65536, // 64 MB
-    parallelism: 1,
+  const derivedEntropy = argon2id(entropy, sha3_256(entropy), {
+    t: 3,
+    m: 65536, // 64 MB
+    p: 1,
   });
 
   if (onProgress) onProgress({ stage: "wasm_derive", detail: "Executando derivação em enclave WASM...", elapsed: performance.now() - t0 });

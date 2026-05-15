@@ -135,11 +135,17 @@ export async function generateBalanceProof(
 }
 
 /**
- * Verifica uma prova ZK (placeholder — o1js verify requer instância de prova).
+ * Verifica uma prova ZK de balanço.
+ * Deserializa a prova JSON e usa o verifier do o1js.
  */
-export async function verifyBalanceProof(_proofJson: string): Promise<boolean> {
+export async function verifyBalanceProof(proofJson: string): Promise<boolean> {
   await compileHydraCircuit();
-  // A verificação real requer a instância de prova do o1js
-  // Por enquanto, retorna true se o circuito compilou
-  return true;
+  try {
+    const proofObj = JSON.parse(proofJson);
+    const result = await HydraBalanceProof.verify(proofObj);
+    return result === true || (result as any)?.isValid === true;
+  } catch (e) {
+    console.error("[ZKP] Verificação falhou:", e);
+    return false;
+  }
 }

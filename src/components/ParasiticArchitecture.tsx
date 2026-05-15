@@ -22,21 +22,24 @@ export default function ParasiticArchitecture() {
     addLog("Iniciando Inoculação Stratum 3 (Ativo de Sistema)...");
 
     try {
-      // 1. Prepara o payload do Orquestrador (mock binário para demo)
-      const mockPayload = new TextEncoder().encode(JSON.stringify({
+      // 1. Prepara o payload do Orquestrador com dados reais
+      const identity = voidOrchestrator.getIdentity();
+      const payload = new TextEncoder().encode(JSON.stringify({
         version: "ΩMEGA-8.0",
-        nodeId: voidOrchestrator.getIdentity()?.handle || "ghost_core",
+        nodeId: identity?.handle || "ghost_core",
+        publicKey: identity ? Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join('') : "",
         protocols: ["QEL", "HCN", "ANIMUS"],
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        entropyBits: identity?.entropyBits || 0
       }));
 
       // 2. Inocula no ícone do PWA
-      const infectedBlob = await animusBootstrap.inoculate(mockPayload, "/icon-512.png");
+      const infectedBlob = await animusBootstrap.inoculate(payload, "/icon-512.png");
       const url = URL.createObjectURL(infectedBlob);
       setInoculatedUrl(url);
 
       // 3. Sincroniza com o Service Worker (Stratum 3 Persistence)
-      await animusBootstrap.syncWithServiceWorker(mockPayload);
+      await animusBootstrap.syncWithServiceWorker(payload);
 
       addLog("✓ Inoculação completa. Payload injetado em icon-512.png");
       addLog("✓ Sincronização Stratum 3 enviada ao Service Worker.");

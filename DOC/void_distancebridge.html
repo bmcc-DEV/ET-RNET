@@ -1,0 +1,109 @@
+
+<style>
+@keyframes move-carrier { 0%{transform:translateX(0)} 100%{transform:translateX(200px)} }
+@keyframes signal-pulse { 0%,100%{opacity:.2;transform:scale(1)} 50%{opacity:.7;transform:scale(1.4)} }
+@keyframes hop { 0%,100%{opacity:.3} 50%{opacity:1} }
+.carrier { animation: move-carrier 4s ease-in-out infinite alternate; }
+.sp1 { animation: signal-pulse 2s infinite; }
+.sp2 { animation: signal-pulse 2s infinite .5s; }
+.sp3 { animation: signal-pulse 2s infinite 1s; }
+.hop1 { animation: hop 1.6s infinite; }
+.hop2 { animation: hop 1.6s infinite .4s; }
+.hop3 { animation: hop 1.6s infinite .8s; }
+.hop4 { animation: hop 1.6s infinite 1.2s; }
+</style>
+<svg width="100%" viewBox="0 0 680 400" role="img">
+<title>DistanceBridge — comunicação de longa distância sem internet via DTN e LoRa</title>
+<desc>Três modos de alcance: local mesh, cidade via human carriers, e longa distância via LoRa e DTN satelital</desc>
+
+<rect x="0" y="0" width="680" height="400" fill="#080b10" rx="12"/>
+<text font-family="monospace" font-size="11" fill="#5F5E5A" x="30" y="30" letter-spacing="3">DISTANCEBRIDGE — ALCANCE GLOBAL ZERO-INFRASTRUCTURE</text>
+
+<rect x="16" y="46" width="200" height="200" rx="10" fill="#0a0d12" stroke="#185FA5" stroke-width="0.5"/>
+<text font-family="monospace" font-size="9" fill="#378ADD" x="116" y="68" text-anchor="middle" letter-spacing="2">MODO 1 · LOCAL</text>
+<text font-family="monospace" font-size="8" fill="#0C447C" x="116" y="84" text-anchor="middle">até 500m · BLE + WiFi Direct</text>
+
+<circle class="sp1" cx="90" cy="150" r="30" fill="none" stroke="#378ADD" stroke-width="0.5"/>
+<circle cx="90" cy="150" r="5" fill="#378ADD"/>
+<text font-family="monospace" font-size="8" fill="#0C447C" x="90" y="168" text-anchor="middle">você</text>
+
+<circle class="sp2" cx="160" cy="130" r="25" fill="none" stroke="#1D9E75" stroke-width="0.5"/>
+<circle cx="160" cy="130" r="4" fill="#1D9E75"/>
+<text font-family="monospace" font-size="8" fill="#0F6E56" x="160" y="148" text-anchor="middle">peer</text>
+
+<circle class="sp3" cx="140" cy="195" r="20" fill="none" stroke="#7F77DD" stroke-width="0.5"/>
+<circle cx="140" cy="195" r="4" fill="#7F77DD"/>
+<text font-family="monospace" font-size="8" fill="#3C3489" x="140" y="213" text-anchor="middle">peer</text>
+
+<line x1="90" y1="150" x2="155" y2="132" stroke="#1D9E75" stroke-width="0.6" stroke-dasharray="3 2" fill="none"/>
+<line x1="90" y1="150" x2="137" y2="193" stroke="#7F77DD" stroke-width="0.6" stroke-dasharray="3 2" fill="none"/>
+
+<rect x="236" y="46" width="210" height="200" rx="10" fill="#0a0d12" stroke="#854F0B" stroke-width="0.5"/>
+<text font-family="monospace" font-size="9" fill="#EF9F27" x="341" y="68" text-anchor="middle" letter-spacing="2">MODO 2 · CIDADE</text>
+<text font-family="monospace" font-size="8" fill="#633806" x="341" y="84" text-anchor="middle">human carriers · store-carry-forward</text>
+
+<rect x="248" y="96" width="50" height="28" rx="4" fill="#0d1a2e" stroke="#185FA5" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#378ADD" x="273" y="114" text-anchor="middle">origem</text>
+
+<g class="carrier">
+  <rect x="310" y="110" width="40" height="24" rx="4" fill="#1a0f00" stroke="#BA7517" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="8" fill="#EF9F27" x="330" y="126" text-anchor="middle">carrier</text>
+</g>
+
+<rect x="380" y="96" width="50" height="28" rx="4" fill="#1a0d2e" stroke="#534AB7" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#7F77DD" x="405" y="114" text-anchor="middle">destino</text>
+
+<text font-family="monospace" font-size="8" fill="#444441" x="341" y="160" text-anchor="middle">shard armazenado no</text>
+<text font-family="monospace" font-size="8" fill="#444441" x="341" y="174" text-anchor="middle">dispositivo do carrier</text>
+<text font-family="monospace" font-size="8" fill="#444441" x="341" y="188" text-anchor="middle">entregue ao passar perto</text>
+<text font-family="monospace" font-size="8" fill="#BA7517" x="341" y="204" text-anchor="middle">TTL: 48h · cifrado · sem ver conteúdo</text>
+<text font-family="monospace" font-size="8" fill="#633806" x="341" y="220" text-anchor="middle">humanos como roteadores anônimos</text>
+
+<rect x="462" y="46" width="204" height="200" rx="10" fill="#0a0d12" stroke="#A32D2D" stroke-width="0.5"/>
+<text font-family="monospace" font-size="9" fill="#E24B4A" x="564" y="68" text-anchor="middle" letter-spacing="2">MODO 3 · GLOBAL</text>
+<text font-family="monospace" font-size="8" fill="#791F1F" x="564" y="84" text-anchor="middle">LoRa + DTN + satélite LEO</text>
+
+<rect x="474" y="96" width="78" height="28" rx="4" fill="#0d1a2e" stroke="#185FA5" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#378ADD" x="513" y="114" text-anchor="middle">LoRa node</text>
+
+<rect x="570" y="96" width="78" height="28" rx="4" fill="#1a0d0d" stroke="#A32D2D" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#E24B4A" x="609" y="114" text-anchor="middle">satélite LEO</text>
+
+<line x1="552" y1="110" x2="568" y2="110" stroke="#E24B4A" stroke-width="0.8" stroke-dasharray="3 2" fill="none"/>
+
+<text font-family="monospace" font-size="8" fill="#444441" x="564" y="158" text-anchor="middle">LoRa: 868/915 MHz</text>
+<text font-family="monospace" font-size="8" fill="#444441" x="564" y="172" text-anchor="middle">alcance até 15km sem infra</text>
+<text font-family="monospace" font-size="8" fill="#444441" x="564" y="186" text-anchor="middle">DTN Bundle Protocol</text>
+<text font-family="monospace" font-size="8" fill="#444441" x="564" y="200" text-anchor="middle">tolera horas de delay</text>
+<text font-family="monospace" font-size="8" fill="#E24B4A" x="564" y="216" text-anchor="middle">Meshtastic compat.</text>
+<text font-family="monospace" font-size="8" fill="#791F1F" x="564" y="230" text-anchor="middle">alertas de desastre, campo</text>
+
+<rect x="16" y="265" width="648" height="110" rx="10" fill="#0a0d12" stroke="#2C2C2A" stroke-width="0.5"/>
+<text font-family="monospace" font-size="11" fill="#888780" x="340" y="290" text-anchor="middle" letter-spacing="3">SELEÇÃO AUTOMÁTICA DE MODO</text>
+
+<rect x="36" y="304" width="130" height="52" rx="6" fill="#0d2b1a" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#5DCAA5" x="101" y="324" text-anchor="middle">peer visível</text>
+<text font-family="monospace" font-size="8" fill="#0F6E56" x="101" y="340" text-anchor="middle">→ modo 1 direto</text>
+<text font-family="monospace" font-size="8" fill="#0F6E56" x="101" y="352" text-anchor="middle">latência: &lt;50ms</text>
+
+<line x1="166" y1="330" x2="192" y2="330" stroke="#888780" stroke-width="0.5" stroke-dasharray="3 2" fill="none"/>
+
+<rect x="193" y="304" width="130" height="52" rx="6" fill="#1a0f00" stroke="#854F0B" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#EF9F27" x="258" y="324" text-anchor="middle">peer na cidade</text>
+<text font-family="monospace" font-size="8" fill="#633806" x="258" y="340" text-anchor="middle">→ human carrier</text>
+<text font-family="monospace" font-size="8" fill="#633806" x="258" y="352" text-anchor="middle">latência: minutos/horas</text>
+
+<line x1="323" y1="330" x2="349" y2="330" stroke="#888780" stroke-width="0.5" stroke-dasharray="3 2" fill="none"/>
+
+<rect x="350" y="304" width="140" height="52" rx="6" fill="#0d1a2e" stroke="#185FA5" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#85B7EB" x="420" y="324" text-anchor="middle">peer no estado/país</text>
+<text font-family="monospace" font-size="8" fill="#0C447C" x="420" y="340" text-anchor="middle">→ LoRa mesh relay</text>
+<text font-family="monospace" font-size="8" fill="#0C447C" x="420" y="352" text-anchor="middle">latência: horas</text>
+
+<line x1="490" y1="330" x2="516" y2="330" stroke="#888780" stroke-width="0.5" stroke-dasharray="3 2" fill="none"/>
+
+<rect x="517" y="304" width="130" height="52" rx="6" fill="#1a0d0d" stroke="#A32D2D" stroke-width="0.5"/>
+<text font-family="monospace" font-size="8" fill="#E24B4A" x="582" y="324" text-anchor="middle">peer no mundo</text>
+<text font-family="monospace" font-size="8" fill="#791F1F" x="582" y="340" text-anchor="middle">→ DTN + satélite</text>
+<text font-family="monospace" font-size="8" fill="#791F1F" x="582" y="352" text-anchor="middle">latência: horas/dias</text>
+</svg>

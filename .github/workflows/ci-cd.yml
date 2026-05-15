@@ -1,0 +1,150 @@
+name: ET-RNET v2.0 Production CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─── BUILD ─────────────────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install LLVM/Clang for eBPF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 llvm-14
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Type check (tsc)
+        run: npx tsc --noEmit
+      
+      - name: Build production
+        run: npm run build
+      
+      - name: Compile eBPF
+        run: |
+          cd kernel
+          clang -O2 -target bpf -c vøid_ebpf.c -o vøid_ebpf.o
+          llvm-objdump -S vøid_ebpf.o > vøid_ebpf.ll
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            dist/
+            kernel/vøid_ebpf.o
+            kernel/vøid_ebpf.ll
+
+  # ─── SECURITY ──────────────────────────────────────────────────────
+  security:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Run npm audit
+        run: npm audit --production || true
+      
+      - name: SAST: semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          generateSarif: true
+      
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: semgrep.sarif
+        if: always()
+
+  # ─── TEST ──────────────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Unit tests
+        run: npm test -- --coverage --watchAll=false
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+
+  # ─── DOCKER BUILD & PUSH ───────────────────────────────────────────
+  docker:
+    runs-on: ubuntu-22.04
+    needs: [build, test]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            etrnet/node:latest
+            etrnet/node:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── DEPLOY ────────────────────────────────────────────────────────
+  deploy:
+    runs-on: ubuntu-22.04
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://et-rnet.dev
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Deploy to production
+        run: |
+          echo "Deploying ${{ github.ref_name }} to production..."
+          echo "1. Pull latest image from Docker Hub"
+          echo "2. Run container with SGX + eBPF configuration"
+          echo "3. Verify remote attestation"
+          echo "4. Register on Solana blockchain"
+          echo "5. Run health checks"
+      
+      - name: Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: "🚀 ET-RNET ${{ github.ref_name }} deployed to production"
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

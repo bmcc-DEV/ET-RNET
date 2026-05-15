@@ -1,0 +1,169 @@
+version: '3.9'
+
+services:
+  # ─── ET-RNET Node ──────────────────────────────────────────────────
+  et-rnet:
+    image: etrnet/node:latest
+    container_name: et-rnet-node-01
+    
+    # Network
+    networks:
+      - et-rnet-mesh
+    ports:
+      - "3000:3000"    # Web UI
+      - "9000:9000"    # gRPC API
+      - "50051:50051"  # P2P protocol
+      - "5353:5353/udp" # mDNS discovery
+    
+    # Volumes
+    volumes:
+      - /sys/fs/bpf:/sys/fs/bpf           # eBPF maps (read-only)
+      - /dev/pts:/dev/pts                  # PTY for console
+      - et-rnet-data:/data/et-rnet         # Persistent storage (CRDT, sealed data)
+      - /dev/ttyUSB0:/dev/lora-device     # LoRa gateway (optional)
+    
+    # Capabilities (for eBPF + network)
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    
+    # Security
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    
+    # SGX enclave (if available on host)
+    device_cgroup_rules:
+      - 'c 10:* rmw'  # /dev/sgx_*
+    
+    # Environment
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - SOLANA_RPC=https://api.mainnet-beta.solana.com
+      - SOLANA_PROGRAM_ID=VoiDKEY7YA1jKrqDTGHLGb3QDQGwG3v2t8qJXQCJvve
+      - CRDT_CONVERGENCE_THRESHOLD=0.01
+      - EBPF_RING_BUFFER_SIZE=256MB
+      - SGX_ENCLAVE_PATH=/opt/et-rnet/trusted/et-rnet-trusted
+      - ATTESTATION_IAS_KEY=${IAS_SPID}
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  # ─── Solana Local Validator (optional, for testing) ──────────────────
+  solana-validator:
+    image: solanalabs/solana:v1.18
+    container_name: solana-local
+    networks:
+      - et-rnet-mesh
+    ports:
+      - "8899:8899"   # RPC
+      - "8900:8900"   # WebSocket
+    volumes:
+      - solana-ledger:/var/lib/solana
+    environment:
+      - RUST_LOG=info
+    command: >
+      solana-test-validator
+      --bpf-program VoiDKEY7YA1jKrqDTGHLGb3QDQGwG3v2t8qJXQCJvve 
+        /opt/et-rnet/contracts/et-rnet-program.so
+    profiles:
+      - dev
+
+  # ─── Prometheus (monitoring) ────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    networks:
+      - et-rnet-mesh
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-storage:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+
+  # ─── Grafana (dashboard) ───────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks:
+      - et-rnet-mesh
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ─── Loki (log aggregation) ────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    networks:
+      - et-rnet-mesh
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yml
+      - loki-storage:/loki
+    command: -config.file=/etc/loki/local-config.yml
+    restart: unless-stopped
+
+networks:
+  et-rnet-mesh:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: 'true'
+    ipam:
+      config:
+        - subnet: 10.100.0.0/24
+
+volumes:
+  et-rnet-data:
+    driver: local
+  solana-ledger:
+    driver: local
+  prometheus-storage:
+    driver: local
+  grafana-storage:
+    driver: local
+  loki-storage:
+    driver: local

@@ -15,7 +15,6 @@
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { createUTXO, type UTXO, formatAmount } from "./utxo";
 import { type GhostIdentity } from "./ghostid";
-import { createPedersenCommitment } from "./utxo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

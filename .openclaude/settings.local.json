@@ -6,7 +6,9 @@
       "Bash(git init:*)",
       "Bash(git remote:*)",
       "Bash(git branch:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm install:*)",
+      "Bash(ls -la /tmp/claude-1000/-home-bruno-Documentos-ET-RNET/20e59edb-9796-4e32-9a35-4b88687b8fac/tasks/a7f27ab7fa9d5797b*)"
     ]
   }
 }

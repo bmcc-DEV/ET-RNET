@@ -6,7 +6,7 @@ export default function GhostVPNPanel() {
   const [session, setSession] = useState<GhostVPNSession | null>(null);
   const [layers, setLayers] = useState<{ name: string; active: boolean }[]>([]);
   const [mac, setMac] = useState<string | null>(null);
-  const [stats, setStats] = useState<any>(null);
+  const [_stats, setStats] = useState<any>(null);
   const [status, setStatus] = useState("");
   const [isStarting, setIsStarting] = useState(false);
 

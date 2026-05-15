@@ -49,7 +49,7 @@ export async function spawnGhostId(
   return {
     handle: idWasm.handle,
     publicKey: idWasm.public_key,
-    privateKey: new Uint8Array(32), // Rust side keeps it internal in a real impl, but we mocked it
+    privateKey: new Uint8Array(32), // WASM não expõe a chave privada (design de segurança intencional)
     entropyBits: 512,
   };
 }

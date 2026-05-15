@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
-import { type HCNShard } from "../storage/hcnStore";
+import { hcnStore, type HCNShard } from "../storage/hcnStore";
 
 type PeerType = {
   id: string;
@@ -81,7 +81,7 @@ export default function EternetDashboard() {
     hcn.getKarmaBalance().then(setKarmaBalance);
     hcn.getValidShards().then((shards: HCNShard[]) => {
       setLocalHcnShards(shards);
-      setPool(prev => {
+      setPool(_prev => {
         const newItems = shards.map(sh => ({
           id: sh.commitment,
           data: sh.payload,
@@ -153,7 +153,7 @@ export default function EternetDashboard() {
   const handleAcousticScan = async () => {
     setAcousticScanning(true);
     try {
-      await orchestrator.acoustic.listen((sender, payload) => {
+      await orchestrator.acoustic.listen((sender, _payload) => {
         setPeers(prev => {
           if (prev.some(p => p.id === sender)) return prev;
           return [...prev, {
@@ -196,6 +196,8 @@ export default function EternetDashboard() {
         address: loraAddress,
         networkId: 1,
         frequency: 915,
+        spreadingFactor: 10,
+        bandwidth: 3,
       });
       setLoraConnected(true);
     } catch (err) {

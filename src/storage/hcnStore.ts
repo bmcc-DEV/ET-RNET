@@ -164,3 +164,6 @@ export class HCNStore {
     return 0;
   }
 }
+
+// Singleton instance for direct imports
+export const hcnStore = new HCNStore();

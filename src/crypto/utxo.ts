@@ -20,6 +20,17 @@ import {
 
 // ... rest of imports
 
+export interface UTXO {
+  id: string;
+  amount: bigint;
+  commitment: Uint8Array;
+  blindingFactor: Uint8Array;
+  ownerPubKey: Uint8Array;
+  causalParents: string[];
+  createdAt: number;
+  spent: boolean;
+}
+
 export interface Transaction {
   inputs: UTXO[];
   outputs: { amount: bigint; recipientPubKey: Uint8Array }[];
@@ -378,12 +389,7 @@ export function createRangeProof(value: bigint, blindingFactor: Uint8Array): { p
       commitment: result.commitment
     };
   } catch (e) {
-    console.error("WASM Range Proof generation failed, using mock:", e);
-    // Mock fallback if WASM fails
-    return {
-      proof: new Uint8Array(64),
-      commitment: new Uint8Array(32)
-    };
+    throw new Error(`WASM Range Proof generation failed: ${e}`);
   }
 }
 

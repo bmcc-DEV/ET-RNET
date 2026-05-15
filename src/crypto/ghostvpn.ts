@@ -15,10 +15,8 @@
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
-import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { fragmentMessage, type FragmentResult, type Shard } from "./qel";
 import { spawnGhostId, type GhostIdentity } from "./ghostid";
-import { buildSphinxPacket, peelSphinxLayer, type SphinxPacket } from "./sphinx";
+import { fragmentMessage } from "./qel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +31,7 @@ export interface GhostVPNConfig {
 export interface VPNLayer {
   name: string;
   active: boolean;
+  byteCounter?: number;
   process(data: Uint8Array): Promise<Uint8Array>;
   recover(data: Uint8Array): Promise<Uint8Array>;
 }

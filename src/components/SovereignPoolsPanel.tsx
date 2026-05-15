@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { sovereignPools, type SIPPool, type SIPShare, type HiddenProposal } from "../crypto/sovereignPools";
+import { sovereignPools, type SIPPool, type HiddenProposal } from "../crypto/sovereignPools";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 import SectionHeader from "./SectionHeader";
 

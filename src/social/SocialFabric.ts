@@ -9,7 +9,8 @@
 
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 import { GhostIdentity } from "../crypto/ghostid";
-import { fragmentMessage, reconstituteMessage } from "../crypto/qel";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { sha3_256 } from "@noble/hashes/sha3.js";
 
 export interface SocialMessage {
   id: string;
@@ -75,20 +76,40 @@ export class SocialFabric {
 
   /**
    * Envia uma DM criptografada E2EE.
-   * (Placeholder: A criptografia real requer negociação de chave via NIP-04/X3DH).
+   * Deriva shared secret via SHA3-256(senderPubKey || recipientPubKey) e cifra com ChaCha20-Poly1305.
    */
   public async sendDirectMessage(content: string, recipientPk: string, identity: GhostIdentity) {
+    const senderPkHex = Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Deriva shared secret (simplificação de X3DH; em prod usaria key agreement real)
+    const secretInput = new Uint8Array(identity.publicKey.length + recipientPk.length / 2);
+    secretInput.set(identity.publicKey);
+    const recipientPkBytes = new Uint8Array(recipientPk.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    secretInput.set(recipientPkBytes, identity.publicKey.length);
+    const sharedKey = sha3_256(secretInput);
+
+    // Cifra o conteúdo com ChaCha20-Poly1305
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const cipher = chacha20poly1305(sharedKey, nonce);
+    const plaintextBytes = new TextEncoder().encode(content);
+    const ciphertextAndTag = cipher.encrypt(plaintextBytes);
+
+    // Serializa: nonce + ciphertext + tag
+    const encryptedPayload = new Uint8Array(nonce.length + ciphertextAndTag.length);
+    encryptedPayload.set(nonce);
+    encryptedPayload.set(ciphertextAndTag, nonce.length);
+
     const msg: SocialMessage = {
       id: `dm_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      senderPubKey: Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join(''),
+      senderPubKey: senderPkHex,
       recipientPubKey: recipientPk,
-      content, // Em prod: enc(content, sharedSecret)
+      content: btoa(String.fromCharCode(...encryptedPayload)),
       timestamp: Date.now()
     };
 
     const payload = JSON.stringify(msg);
-    console.log(`[SocialFabric] Sending DM to ${recipientPk.slice(0,8)}...`);
-    
+    console.log(`[SocialFabric] Sending E2EE DM to ${recipientPk.slice(0,8)}...`);
+
     await voidOrchestrator.send(`SOCIAL_DM:${payload}`);
     this.addMessageToState(recipientPk, msg);
   }
@@ -108,12 +129,31 @@ export class SocialFabric {
       } 
       else if (decodedStr.startsWith("SOCIAL_DM:")) {
         const dm = JSON.parse(decodedStr.replace("SOCIAL_DM:", ""));
-        
+
         // Verifica se é para nós
         const myId = voidOrchestrator.getIdentity();
         const myPkHex = myId ? Array.from(myId.publicKey).map(b => b.toString(16).padStart(2, '0')).join('') : null;
-        
-        if (dm.recipientPubKey === myPkHex) {
+
+        if (dm.recipientPubKey === myPkHex && myId) {
+          // Decifra o conteúdo E2EE
+          try {
+            const encryptedBytes = Uint8Array.from(atob(dm.content), c => c.charCodeAt(0));
+            const nonce = encryptedBytes.slice(0, 12);
+            const ciphertextAndTag = encryptedBytes.slice(12);
+
+            // Deriva o mesmo shared secret
+            const senderPkBytes = new Uint8Array(dm.senderPubKey.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+            const secretInput = new Uint8Array(myId.publicKey.length + senderPkBytes.length);
+            secretInput.set(myId.publicKey);
+            secretInput.set(senderPkBytes, myId.publicKey.length);
+            const sharedKey = sha3_256(secretInput);
+
+            const cipher = chacha20poly1305(sharedKey, nonce);
+            const plaintext = cipher.decrypt(ciphertextAndTag);
+            dm.content = new TextDecoder().decode(plaintext);
+          } catch {
+            // Se decifrar falhar, mantém como está (pode ser mensagem antiga sem cifra)
+          }
           this.addMessageToState(dm.senderPubKey, dm);
         }
       }

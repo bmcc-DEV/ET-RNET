@@ -26,7 +26,7 @@ export class VoidDatabase extends Dexie {
   }
 
   async getUnspentUTXOs(): Promise<UTXO[]> {
-    return await this.utxos.where('spent').equals('false').toArray();
+    return await this.utxos.filter(utxo => utxo.spent !== true).toArray();
   }
 
   async getAllUTXOs(): Promise<UTXO[]> {

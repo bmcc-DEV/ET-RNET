@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { HydraBalanceProof, ZKUTXO, ZKTransactionProof } from "../crypto/zkp";
-import { Field, Group, Scalar, Provable } from "o1js";
+import { ZKUTXO } from "../crypto/zkp";
+import { Field, Group, Scalar } from "o1js";
 
 export default function ZKPLab() {
   const [logs, setLogs] = useState<string[]>([]);
-  const [isCompiling, setIsCompiling] = useState(false);
   const [isProving, setIsProving] = useState(false);
   const [proofResult, setProofResult] = useState<string | null>(null);
 
@@ -21,17 +20,20 @@ export default function ZKPLab() {
       // Simulando a execução do circuito o1js em modo Provable
       // Nota: o compile() real levaria muito tempo, então usamos o modo interactivo
       
-      const inputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
+      const _inputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
         amount: Field(i === 0 ? 100 : 0),
         blindingFactor: Field(Math.floor(Math.random() * 1000000)),
         commitment: Group.generator.scale(Scalar.from(Math.floor(Math.random() * 1000000))),
       }));
 
-      const outputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
+      const _outputs = Array.from({ length: 10 }, (_, i) => new ZKUTXO({
         amount: Field(i === 0 ? 100 : 0),
         blindingFactor: Field(Math.floor(Math.random() * 1000000)),
         commitment: Group.generator.scale(Scalar.from(Math.floor(Math.random() * 1000000))),
       }));
+
+      addLog(`UTXOs de entrada gerados: ${_inputs.length}`);
+      addLog(`UTXOs de saída gerados: ${_outputs.length}`);
 
       addLog("Calculando Σ C_in e Σ C_out na curva Pallas...");
       

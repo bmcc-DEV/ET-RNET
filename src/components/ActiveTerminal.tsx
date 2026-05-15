@@ -26,7 +26,28 @@ import {
 } from "../crypto/pqc";
 import { powerGovernor, PowerLevel, type PowerStatus } from "../core/PowerGovernor";
 import { db } from "../storage/utxoStore";
-// ... existing imports
+import { FragmentedOrderBook, fragmentOrder, type OrderIntent, type MatchResult } from "../crypto/matchmaker";
+
+type OrderType = {
+  id: string;
+  pair: string;
+  side: "BUY" | "SELL";
+  amount: number;
+  price: number;
+  shards: string[];
+  status: "matching" | "filled" | "cancelled";
+};
+import { verifyBalanceProof } from "../crypto/utxo";
+
+type ShardType = {
+  id: number;
+  data: string;
+  route: string;
+  status: "routing" | "delivered";
+  progress: number;
+  commitment: string;
+  realShard?: Shard;
+};
 
 export default function ActiveTerminal() {
   const { identity, spawn, destroy, orchestrator } = useVoid();
@@ -46,7 +67,7 @@ export default function ActiveTerminal() {
   const [sessionKey, setSessionKey] = useState<Uint8Array | null>(null);
 
   // New metrics state
-  const [zkMetrics, setZkMetrics] = useState({ proofs: 0, avgTime: 0 });
+  const [_zkMetrics] = useState({ proofs: 0, avgTime: 0 });
   const [meshPeers, setMeshPeers] = useState(0);
   const [powerState, setPowerState] = useState<PowerStatus>({ level: PowerLevel.LEVEL_4_ACTIVE, batteryPercent: 100, isCharging: true, capabilities: [] });
 

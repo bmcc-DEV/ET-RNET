@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { mirageCompute, type MirageExecution, type CodeFragment } from "../crypto/mirageCompute";
+import { mirageCompute, type MirageExecution } from "../crypto/mirageCompute";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 import SectionHeader from "./SectionHeader";
 

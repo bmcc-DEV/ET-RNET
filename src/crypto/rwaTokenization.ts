@@ -9,7 +9,8 @@
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 import { GhostIdentity } from "../crypto/ghostid";
-import { createUTXO, parseAmount, UTXO } from "./utxo";
+import { createUTXO, UTXO } from "./utxo";
+import { signWithNodeKey } from "./signingKeys";
 
 export interface AssetMetadata {
   id: string;
@@ -64,7 +65,7 @@ export class RwaManager {
    * Gera um 'Fóssil de Ativo' que aguarda testemunhas na rede mesh.
    */
   public async registerAsset(meta: Omit<AssetMetadata, "id">, identity: GhostIdentity): Promise<TokenizedAsset> {
-    const assetId = `asset_${Array.from(sha3_256(JSON.stringify(meta))).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)}`;
+    const assetId = `asset_${Array.from(sha3_256(new TextEncoder().encode(JSON.stringify(meta)))).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)}`;
     
     const asset: TokenizedAsset = {
       metadata: { ...meta, id: assetId },
@@ -89,10 +90,16 @@ export class RwaManager {
    * Em produção, isso exigiria proximidade física (BLE/NFC) ou prova visual ZK.
    */
   public async signAsWitness(assetId: string, identity: GhostIdentity) {
+    const timestamp = Date.now();
+    const witnessPk = Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+    const signature = signWithNodeKey(
+      "rwa-witness",
+      sha3_256(new TextEncoder().encode(`${assetId}:${timestamp}`))
+    );
     const report: WitnessReport = {
-      witnessPk: Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join(''),
-      timestamp: Date.now(),
-      signature: new Uint8Array(64), // Mock de assinatura Ed25519
+      witnessPk,
+      timestamp,
+      signature,
       verdict: "CONFIRMED"
     };
 
@@ -132,7 +139,7 @@ export class RwaManager {
     const fractionValue = asset.metadata.valuation / asset.totalFractions;
 
     // Geramos as frações como UTXOs reais do Hydra
-    for (let i = 0; i < 10; i++) { // Para demo, geramos apenas 10 UTXOs iniciais
+    for (let i = 0; i < asset.totalFractions; i++) {
        fractions.push(createUTXO(fractionValue, identity.publicKey));
     }
 

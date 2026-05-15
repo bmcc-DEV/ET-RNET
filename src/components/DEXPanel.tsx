@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
 import { FragmentedOrderBook, type OrderIntent, type MatchResult, type OrderSide } from "../crypto/matchmaker";
-import { formatAmount } from "../crypto/utxo";
 
 const orderBook = new FragmentedOrderBook();
 

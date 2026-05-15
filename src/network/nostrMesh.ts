@@ -6,7 +6,7 @@
  * nós conectam via WebRTC, a comunicação é 100% P2P e invisível aos relays.
  */
 
-import { SimplePool, generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools';
+import { SimplePool, generateSecretKey, getPublicKey, finalizeEvent, nip04 } from 'nostr-tools';
 import { voidOrchestrator } from '../core/VoidOrchestrator';
 
 export class NostrWebRTCMesh {
@@ -46,23 +46,19 @@ export class NostrWebRTCMesh {
   }
 
   private listenForSignaling() {
-    this.pool.subscribeMany(this.relays, [
-      { 
-        kinds: [4], 
-        "#p": [this.pk] 
-      }
-    ], {
+    this.pool.subscribeMany(this.relays, {
+      kinds: [4],
+      "#p": [this.pk]
+    }, {
       onevent: (event: any) => this.handleSignaling(event)
     });
   }
 
   private listenForPeers() {
-    this.pool.subscribeMany(this.relays, [
-      { 
-        kinds: [30000], 
-        "#t": ['void_omega_rendezvous'] 
-      }
-    ], {
+    this.pool.subscribeMany(this.relays, {
+      kinds: [30000],
+      "#t": ['void_omega_rendezvous']
+    }, {
       onevent: (event: any) => {
         if (event.pubkey !== this.pk && !this.peerConnections.has(event.pubkey)) {
           console.log(`[NostrMesh] Novo peer descoberto: ${event.pubkey.slice(0,8)}... Conectando.`);
@@ -73,10 +69,11 @@ export class NostrWebRTCMesh {
   }
 
   private async handleSignaling(event: any) {
-    // Descriptografia Nostr NIP-04 omitida para brevidade (simulação do payload)
     try {
-      const payload = JSON.parse(event.content); // Em prod: decrypt(event.content)
-      
+      // Decifra NIP-04
+      const decrypted = await nip04.decrypt(this.sk, event.pubkey, event.content);
+      const payload = JSON.parse(decrypted);
+
       if (payload.type === 'offer') {
         const pc = this.createPeerConnection(event.pubkey);
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
@@ -95,13 +92,14 @@ export class NostrWebRTCMesh {
     }
   }
 
-  private sendSignaling(targetPk: string, payload: any) {
-    // Cifra e envia DM via NOSTR
+  private async sendSignaling(targetPk: string, payload: any) {
+    // Cifra NIP-04 e envia DM via NOSTR
+    const encrypted = await nip04.encrypt(this.sk, targetPk, JSON.stringify(payload));
     const event = finalizeEvent({
       kind: 4,
       created_at: Math.floor(Date.now() / 1000),
       tags: [['p', targetPk]],
-      content: JSON.stringify(payload) // Em prod: encrypt(targetPk, payload)
+      content: encrypted
     }, this.sk);
 
     this.pool.publish(this.relays, event);

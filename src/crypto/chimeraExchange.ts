@@ -223,6 +223,7 @@ export class ChimeraExchange {
 
     const order: ChimeraOrder = {
       ...orderIntent,
+      traderPk: orderIntent.traderPubKey,
       shards,
       isEncrypted: true,
     };
@@ -250,7 +251,7 @@ export class ChimeraExchange {
   /**
    * Adiciona liquidez a um pool.
    */
-  addLiquidity(pair: string, amount: number, identity: GhostIdentity): number {
+  addLiquidity(pair: string, amount: number, _identity: GhostIdentity): number {
     const pool = this.pools.get(pair);
     if (!pool) throw new Error(`Par ${pair} não encontrado`);
 

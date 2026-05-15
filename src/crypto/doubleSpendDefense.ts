@@ -27,6 +27,8 @@
 //
 // Compilado como WebAssembly inline — equivalente ao Rust compilado com wasm32-unknown-unknown.
 
+import { gfMul as gfMulShared, gfInv as gfInvShared } from "./gf256";
+
 const WASM_BINARY = new Uint8Array([
   0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // WASM magic + version
   0x01, 0x0d, 0x03,                                 // Type section: 3 types
@@ -93,24 +95,10 @@ export async function initWasm(): Promise<typeof wasmExports> {
 
 // ─── Fallback GF(256) in pure JS (quando WASM não disponível) ────────────────
 
-const GF_EXP = new Uint8Array(512);
-const GF_LOG = new Uint8Array(256);
 let fallbackCounter = 0;
 
-(function buildGfTables() {
-  let x = 1;
-  for (let i = 0; i < 255; i++) {
-    GF_EXP[i] = x;
-    GF_LOG[x] = i;
-    x <<= 1;
-    if (x & 0x100) x ^= 0x11b;
-  }
-  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
-})();
-
 function gfMulJS(a: number, b: number): number {
-  if (a === 0 || b === 0) return 0;
-  return GF_EXP[(GF_LOG[a] + GF_LOG[b]) % 255];
+  return gfMulShared(a, b);
 }
 
 function shamirEvalJS(secret: number, k: number, x: number): number {
@@ -118,8 +106,7 @@ function shamirEvalJS(secret: number, k: number, x: number): number {
 }
 
 function gfInv(a: number): number {
-  if (a === 0) throw new Error("GF inverse of zero");
-  return GF_EXP[255 - GF_LOG[a]];
+  return gfInvShared(a);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

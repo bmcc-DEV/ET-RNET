@@ -62,11 +62,31 @@ self.addEventListener("periodicsync", (event) => {
   }
 });
 
+// Local peer discovery via BroadcastChannel (cross-tab mesh)
+let discoveredPeers = [];
+const meshChannel = new BroadcastChannel("void_sw_mesh");
+meshChannel.onmessage = (e) => {
+  if (e.data?.type === "PEER_ANNOUNCE" && e.data.peerId) {
+    if (!discoveredPeers.find(p => p.id === e.data.peerId)) {
+      discoveredPeers.push({ id: e.data.peerId, lastSeen: Date.now() });
+    }
+  }
+};
+
 async function relayShardsInBackground() {
   const shards = await getAllShardsFromDB();
-  console.log(`[ANIMUS SW] Relaying ${shards.length} shards to active peers...`);
-  // Em uma rede real, o SW usaria a API de Background Sync para enviar shards 
-  // mesmo quando a página está fechada.
+  if (shards.length === 0) return;
+
+  // Relay shards to peers via BroadcastChannel
+  const unrelayed = shards.filter(s => !s.relayed);
+  if (unrelayed.length > 0) {
+    meshChannel.postMessage({
+      type: "SHARD_RELAY",
+      shards: unrelayed.map(s => ({ id: s.id, commitment: s.commitment, data: s.data })),
+      count: unrelayed.length,
+    });
+    console.log(`[ANIMUS SW] Relayed ${unrelayed.length} shards via BroadcastChannel`);
+  }
 }
 
 self.addEventListener("push", (event) => {

@@ -12,9 +12,8 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
-import { janusFinance, type VirtualCard } from "./janusFinance";
+import { janusFinance } from "./janusFinance";
 import { ghostVPN } from "./ghostvpn";
-import { fragmentMessage } from "./qel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,7 +81,7 @@ export class PhantomShopper {
   private static instance: PhantomShopper;
   private purchases: Map<string, GhostPurchase> = new Map();
   private lockers: Map<string, GhostLocker> = new Map();
-  private activePurchase: GhostPurchase | null = null;
+  // activePurchase tracking managed inline
 
   // Marketplaces suportados
   private readonly MARKETPLACES: Marketplace[] = [
@@ -141,7 +140,7 @@ export class PhantomShopper {
     await ghostVPN.startSession();
 
     // 2. Converte moeda (OmniPay Router)
-    const { amount: convertedAmount, currency: convertedCurrency } = this.convertCurrency(
+    const { amount: convertedAmount, currency: convertedCurrency } = await this.convertCurrency(
       itemPrice, currency, "BRL"
     );
 
@@ -180,7 +179,6 @@ export class PhantomShopper {
     };
 
     this.purchases.set(purchase.id, purchase);
-    this.activePurchase = purchase;
 
     // 7. Para histórico (EcoNet-style decay)
     console.log(`[Phantom] Compra ${purchase.id} realizada!`);
@@ -196,24 +194,47 @@ export class PhantomShopper {
 
   // ─── Currency Conversion (OmniPay Router) ────────────────────────────────
 
-  private convertCurrency(
+  private static cachedRates: Record<string, number> = {
+    "USD_BRL": 5.05, "JPY_BRL": 0.034, "CNY_BRL": 0.70,
+    "BRL_USD": 0.198, "BRL_JPY": 29.4, "BRL_CNY": 1.43,
+  };
+
+  private static ratesFetchedAt = 0;
+
+  /**
+   * Busca taxas de câmbio de API pública, com cache de 1h e fallback.
+   */
+  private async fetchRates(): Promise<void> {
+    if (Date.now() - PhantomShopper.ratesFetchedAt < 3600000) return;
+    try {
+      const res = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const brl = data.rates?.BRL;
+      if (brl && brl > 0) {
+        PhantomShopper.cachedRates = {
+          "USD_BRL": brl,
+          "BRL_USD": 1 / brl,
+          "JPY_BRL": brl / (data.rates?.JPY ?? 1),
+          "BRL_JPY": (data.rates?.JPY ?? 1) / brl,
+          "CNY_BRL": brl / (data.rates?.CNY ?? 1),
+          "BRL_CNY": (data.rates?.CNY ?? 1) / brl,
+        };
+        PhantomShopper.ratesFetchedAt = Date.now();
+      }
+    } catch {
+      // Usa taxas em cache (fallback)
+    }
+  }
+
+  private async convertCurrency(
     amount: number,
     from: string,
     to: string,
-  ): { amount: number; currency: string } {
+  ): Promise<{ amount: number; currency: string }> {
     if (from === to) return { amount, currency: to };
-
-    // Taxas simuladas (em produção, usaria oráculo descentralizado)
-    const rates: Record<string, number> = {
-      "USD_BRL": 5.05,
-      "JPY_BRL": 0.034,
-      "CNY_BRL": 0.70,
-      "BRL_USD": 0.198,
-      "BRL_JPY": 29.4,
-      "BRL_CNY": 1.43,
-    };
-
-    const rate = rates[`${from}_${to}`] || 1.0;
+    await this.fetchRates();
+    const rate = PhantomShopper.cachedRates[`${from}_${to}`] || 1.0;
     return {
       amount: amount * rate,
       currency: to,

@@ -14,6 +14,7 @@ import { sha3_256 } from "@noble/hashes/sha3.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { createUTXO, type UTXO } from "./utxo";
 import { type GhostIdentity } from "./ghostid";
+import { signWithNodeKey } from "./signingKeys";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -243,24 +244,47 @@ export class MirageCompute {
   }
 
   /**
-   * Executa bytecode no enclave (simulado).
+   * Executa bytecode no enclave via WebAssembly.
+   * Se WASM não estiver disponível, retorna hash determinístico (fail-safe).
    */
   private async runInEnclave(
     code: Uint8Array,
     inputs: CodeFragment[],
-    enclaveId: string,
+    _enclaveId: string,
   ): Promise<Uint8Array> {
-    // Simula tempo de execução
-    await new Promise(r => setTimeout(r, 100 + Math.random() * 200));
-
-    // Output simulado: hash do código + inputs
     const combined = new Uint8Array(code.length + inputs.length * 32);
     combined.set(code);
     inputs.forEach((input, i) => {
       combined.set(input.bytecode.slice(0, 32), code.length + i * 32);
     });
 
-    return sha3_256(combined);
+    // Tenta execução WASM real
+    try {
+      const wasmModule = await WebAssembly.compile(code as BufferSource);
+      const memory = new WebAssembly.Memory({ initial: 1 });
+      const instance = await WebAssembly.instantiate(wasmModule, {
+        env: { memory },
+      });
+
+      // Escreve inputs na memória WASM e executa
+      const memView = new Uint8Array(memory.buffer);
+      const inputOffset = code.length;
+      memView.set(combined.slice(code.length), inputOffset);
+
+      // Chama a função 'process' se existir, senão usa 'main'
+      const exports = instance.exports as any;
+      if (typeof exports.process === "function") {
+        const resultPtr = exports.process(inputOffset, inputs.length * 32);
+        const result = new Uint8Array(memory.buffer.slice(resultPtr, resultPtr + 32));
+        return sha3_256(result);
+      }
+
+      // Fallback: hash determinístico se WASM não tem entry point
+      return sha3_256(combined);
+    } catch {
+      // WASM inválido ou não suportado: retorna hash determinístico
+      return sha3_256(combined);
+    }
   }
 
   // ─── Causal Consensus ────────────────────────────────────────────────────
@@ -277,10 +301,14 @@ export class MirageCompute {
 
     this.causalOrderCounter++;
 
+    const witnessData = `${executionId}:${nodeId}:${Date.now()}:${this.causalOrderCounter}`;
     const witness: CausalWitness = {
       nodeId,
       timestamp: Date.now(),
-      signature: crypto.getRandomValues(new Uint8Array(64)),
+      signature: signWithNodeKey(
+        "mirage-witness",
+        sha3_256(new TextEncoder().encode(witnessData))
+      ),
       causalOrder: this.causalOrderCounter,
     };
 

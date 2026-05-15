@@ -8,6 +8,14 @@
  * usando a Web Serial API.
  */
 
+// Web Serial API types (não incluídas nos types padrão do TS)
+interface SerialPort {
+  open(options: { baudRate: number }): Promise<void>;
+  close(): Promise<void>;
+  readable: ReadableStream<Uint8Array> | null;
+  writable: WritableStream<Uint8Array> | null;
+}
+
 export interface LoRaConfig {
   baudRate: number;
   address: number;   // endereço do rádio local (0-65535)
@@ -18,7 +26,13 @@ export interface LoRaConfig {
 }
 
 export class LoRaDriver {
-  // ... rest of implementation
+  private port: SerialPort | null = null;
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private onMessageReceivedCallback: ((senderAddr: number, payload: string) => void) | null = null;
+
+  public isSupported(): boolean {
+    return "serial" in navigator;
+  }
 
   /**
    * Solicita acesso à porta USB/Serial e abre conexão com o transceptor LoRa.
@@ -28,7 +42,7 @@ export class LoRaDriver {
 
     try {
       this.port = await (navigator as any).serial.requestPort();
-      await this.port.open({ baudRate: config.baudRate });
+      await this.port!.open({ baudRate: config.baudRate });
       console.log("[LoRa Driver] Conectado ao hardware LoRa via Serial.");
 
       // Inicializa configurações AT

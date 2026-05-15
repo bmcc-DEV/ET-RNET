@@ -74,7 +74,6 @@ export class AegisVault {
   private static instance: AegisVault;
   private vaults: Map<string, VaultState> = new Map();
   private config: AegisVaultConfig;
-  private convergenceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   public static getInstance(config?: Partial<AegisVaultConfig>): AegisVault {
     if (!AegisVault.instance) {
@@ -194,7 +193,7 @@ export class AegisVault {
    */
   verifyBiometricResponse(
     vaultId: string,
-    challengeId: string,
+    _challengeId: string,
     response: Uint8Array,
   ): boolean {
     const vault = this.vaults.get(vaultId);

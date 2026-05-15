@@ -12,7 +12,6 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
-import { createUTXO, type UTXO } from "./utxo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,7 +90,7 @@ export class SovereignPools {
   /**
    * Cria um novo Sovereign Investment Pool.
    */
-  createPool(config: SIPConfig, manager: GhostIdentity): SIPPool {
+  createPool(config: SIPConfig, _manager: GhostIdentity): SIPPool {
     const poolId = `sip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     const pool: SIPPool = {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ParasiticArchitecture as PA } from "../crypto/supplyChain";
 import { animusBootstrap } from "../omega/AnimusBootstrap";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
@@ -13,8 +13,6 @@ export default function ParasiticArchitecture() {
   // --- ANIMUS INOCULATOR STATE ---
   const [isInoculating, setIsInoculating] = useState(false);
   const [inoculatedUrl, setInoculatedUrl] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
   const addLog = useCallback((msg: string) => {
     setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 40));
   }, []);

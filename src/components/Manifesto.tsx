@@ -35,9 +35,13 @@ export default function Manifesto() {
             VOLTAR_AO_CORE
             <span className="group-hover:-translate-x-1 transition-transform">▴</span>
           </a>
-          <button className="inline-flex items-center gap-3 px-6 py-3 border border-[#14181c] text-zinc-400 font-mono text-xs tracking-[0.2em] hover:border-[#b6ff3a]/40 hover:text-[#b6ff3a] transition-colors">
+          <a
+            href="/whitepaper.pdf"
+            download
+            className="inline-flex items-center gap-3 px-6 py-3 border border-[#14181c] text-zinc-400 font-mono text-xs tracking-[0.2em] hover:border-[#b6ff3a]/40 hover:text-[#b6ff3a] transition-colors"
+          >
             DOWNLOAD_WHITEPAPER.PDF
-          </button>
+          </a>
         </div>
 
         <div className="mt-20 pt-10 border-t border-[#14181c] max-w-3xl mx-auto">

@@ -7,14 +7,22 @@ import {
   isDeepResearchWasmAvailable,
   makeReceiptProof,
 } from "../omega/wasmDeepResearch";
-import { hideInPixels, extractFromPixels, embedInWeights, recoverFromWeights } from "../omega/steganography";
+import { hideInPixels, extractFromPixels } from "../omega/steganography";
 
-// ... (sampleMatrix remains)
+const defaultMatrix = [
+  [1, 0, 0, 0],
+  [0, 2, 0, 0],
+  [0, 0, 0, 0],
+  [0, 0, 0, 4],
+];
 
 export default function OmegaResearchLab() {
   // --- Existing state ---
   const [svdState, setSvdState] = useState<"idle" | "running" | "done">("idle");
-  // ...
+  const [traceInput, setTraceInput] = useState("step_0: init\nstep_1: load_module\nstep_2: verify_attestation\nstep_3: execute");
+  const [programId, setProgramId] = useState("zkvm_program_v1");
+  const [svdResult, setSvdResult] = useState<{ dominantVector: number[]; nullScore: number; interpretation: string } | null>(null);
+  const [sampleMatrix] = useState(defaultMatrix);
   const [attestationInput, setAttestationInput] = useState(
     "QUOTE\nMRENCLAVE=7f1a...\nNONCE=92ab...\nSIGNATURE=tee-sig-demo"
   );

@@ -1,12 +1,10 @@
 /**
  * ETΞRNET — PaleoCLI & Paleocomputation Engine
- * 
- * O código-fonte não é mais um texto; é um fóssil. 
+ *
+ * O código-fonte não é mais um texto; é um fóssil.
  * O PaleoEngine extrai invariantes topológicos de binários (WASM/eBPF)
  * para garantir que a lógica seja imutável e verificável matematicamente.
  */
-
-import init, { init_void_core } from "void_core";
 
 export interface FossilInvariant {
   type: "CFG" | "SSA" | "STACK_MORPHOLOGY";
@@ -68,7 +66,7 @@ export class PaleoEngine {
    * Motor de Falsificação (Z3 Integration + PaleoProofNet)
    * Usa Z3 WASM local para micro-etapas e delega processamento pesado para a malha.
    */
-  private async verifyWithZ3(invariants: FossilInvariant[]): Promise<{ isSatisfiable: boolean, proof: string }> {
+  private async verifyWithZ3(_invariants: FossilInvariant[]): Promise<{ isSatisfiable: boolean, proof: string }> {
     console.log("[PaleoProofNet] Iniciando verificação híbrida descentralizada...");
     
     console.log("[PaleoProofNet] Fatiando cláusulas Z3 localmente via WASM...");

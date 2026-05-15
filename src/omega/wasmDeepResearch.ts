@@ -3,7 +3,7 @@ import { sha3_256 } from "@noble/hashes/sha3.js";
 // Simulação da chamada FFI para o núcleo Rust/WASM (void_core).
 // Como wasm-pack não está disponível no ambiente atual para recompilar, 
 // criamos este mock que representa a integração já codificada em lib.rs.
-const analyze_null_space = (flatMatrix: Float64Array, size: number) => {
+const analyze_null_space = (_flatMatrix: Float64Array, _size: number) => {
   return { null_score: 850.0 };
 };
 

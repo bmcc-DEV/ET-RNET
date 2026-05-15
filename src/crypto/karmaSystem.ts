@@ -15,6 +15,8 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { createPedersenCommitment } from "./utxo";
+import { signWithNodeKey } from "./signingKeys";
 
 // Função helper para gerar bytes aleatórios usando Web Crypto API
 function randomBytes(length: number): Uint8Array {
@@ -55,16 +57,12 @@ export interface KarmaWallet {
  */
 const wasmKarmaCore = {
   /**
-   * Gera um Pedersen-like commitment: C = r·G + v·H
-   * Onde G e H são pontos na curva, r é aleatório, v é o valor.
+   * Gera um Pedersen commitment real: C = r·G + v·H
+   * Usa Ed25519 curve arithmetic via utxo.ts (mesmo motor do Hydra UTXO).
    */
   generateCommitment(value: number, blindingFactor: Uint8Array): Uint8Array {
-    // Simulação: Hash do valor + blinding
-    const valueBytes = new TextEncoder().encode(value.toString());
-    const combined = new Uint8Array(valueBytes.length + blindingFactor.length);
-    combined.set(valueBytes);
-    combined.set(blindingFactor, valueBytes.length);
-    return sha3_256(combined);
+    const { commitment } = createPedersenCommitment(BigInt(value), blindingFactor);
+    return commitment;
   },
 
   /**
@@ -121,7 +119,10 @@ const wasmKarmaCore = {
       blindingFactor: newBlinding,
       nullifier: this.generateNullifier(newId, newBlinding),
       epoch: Math.floor(Date.now() / (24 * 60 * 60 * 1000)), // Epoch diária
-      signature: new Uint8Array(64), // Placeholder para assinatura real
+      signature: signWithNodeKey(
+        "karma-system",
+        sha3_256(new TextEncoder().encode(`${newId}:${totalAmount}:${newBlinding}`))
+      ),
     };
   },
 
@@ -134,14 +135,18 @@ const wasmKarmaCore = {
 
     return amounts.map(amount => {
       const blinding = randomBytes(32);
+      const splitId = `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
       return {
-        id: `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+        id: splitId,
         amount,
         commitment: this.generateCommitment(amount, blinding),
         blindingFactor: blinding,
         nullifier: this.generateNullifier(`split_${amount}`, blinding),
         epoch: token.epoch,
-        signature: new Uint8Array(64),
+        signature: signWithNodeKey(
+          "karma-system",
+          sha3_256(new TextEncoder().encode(`${splitId}:${amount}:${blinding}`))
+        ),
       };
     });
   },

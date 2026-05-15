@@ -10,6 +10,7 @@
 
 import { ml_kem1024 } from "@noble/post-quantum/ml-kem.js";
 import { ml_dsa87 } from "@noble/post-quantum/ml-dsa.js";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,23 +139,12 @@ export function hybridEncrypt(
 
   // Step 3: Encrypt with ChaCha20-Poly1305
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const keyStream = new Uint8Array(plaintext.length);
-  // Simplificação: XOR com keystream derivada
-  // Em produção, usaria ChaCha20-Poly1305 completo
-  for (let i = 0; i < plaintext.length; i++) {
-    keyStream[i] = symmetricKey[i % 32] ^ nonce[i % 12];
-  }
+  const cipher = chacha20poly1305(symmetricKey, nonce);
+  const ciphertextAndTag = cipher.encrypt(plaintext);
 
-  const ciphertext = new Uint8Array(plaintext.length);
-  for (let i = 0; i < plaintext.length; i++) {
-    ciphertext[i] = plaintext[i] ^ keyStream[i];
-  }
-
-  // Tag simplificado (em produção: Poly1305)
-  const tag = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) {
-    tag[i] = ciphertext[i % ciphertext.length] ^ symmetricKey[i];
-  }
+  // Separa ciphertext e tag (últimos 16 bytes)
+  const ciphertext = ciphertextAndTag.slice(0, ciphertextAndTag.length - 16);
+  const tag = ciphertextAndTag.slice(ciphertextAndTag.length - 16);
 
   return { ciphertext, encapsulatedKey, nonce, tag };
 }
@@ -175,18 +165,13 @@ export function hybridDecrypt(
   const sharedSecret = mlkemDecapsulate(privateKey, encapsulatedKey);
   const symmetricKey = sharedSecret.slice(0, 32);
 
-  // Step 2: Decrypt
-  const keyStream = new Uint8Array(ciphertext.length);
-  for (let i = 0; i < ciphertext.length; i++) {
-    keyStream[i] = symmetricKey[i % 32] ^ nonce[i % 12];
-  }
-
-  const plaintext = new Uint8Array(ciphertext.length);
-  for (let i = 0; i < ciphertext.length; i++) {
-    plaintext[i] = ciphertext[i] ^ keyStream[i];
-  }
-
-  return plaintext;
+  // Step 2: Decrypt with ChaCha20-Poly1305
+  const cipher = chacha20poly1305(symmetricKey, nonce);
+  // Reconstroi ciphertext + tag para o decrypt
+  const ciphertextAndTag = new Uint8Array(ciphertext.length + _tag.length);
+  ciphertextAndTag.set(ciphertext);
+  ciphertextAndTag.set(_tag, ciphertext.length);
+  return cipher.decrypt(ciphertextAndTag);
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

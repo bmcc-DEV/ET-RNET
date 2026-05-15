@@ -7,7 +7,7 @@ export default function JanusFinancePanel() {
   const [balance, setBalance] = useState<JanusBalance | null>(null);
   const [cards, setCards] = useState<VirtualCard[]>([]);
   const [statement, setStatement] = useState<StatementLine[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [_stats, setStats] = useState<any>(null);
   const [status, setStatus] = useState("");
   const [depositAmount, setDepositAmount] = useState("");
   const [pixAmount, setPixAmount] = useState("");

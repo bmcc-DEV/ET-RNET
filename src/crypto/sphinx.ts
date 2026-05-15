@@ -7,7 +7,7 @@
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 
 // Tamanho fixo do payload para evitar análise de tráfego (ex: 512 bytes)
 export const SPHINX_PAYLOAD_SIZE = 512;

@@ -34,9 +34,16 @@ export class SovTokenomics {
   }
 
   private constructor() {
-    // Simula variação de carga da rede global
+    // Ajusta dificuldade baseado em peers reais via BroadcastChannel
+    const mesh = new BroadcastChannel("void_omega_mesh");
+    let peerCount = 1;
+    mesh.onmessage = (e) => {
+      if (e.data?.type === "PEER_ANNOUNCE") peerCount++;
+    };
     setInterval(() => {
-      this.globalLoad = 0.3 + Math.random() * 0.4;
+      // Load = f(peerCount, tempo_ativo) — sem Math.random()
+      const uptimeFactor = Math.min(Date.now() / 3600000, 1); // 0→1 em 1h
+      this.globalLoad = Math.min(0.3 + (peerCount / 100) * 0.4 + uptimeFactor * 0.1, 1.0);
       this.adjustDifficulty();
     }, 30000);
   }

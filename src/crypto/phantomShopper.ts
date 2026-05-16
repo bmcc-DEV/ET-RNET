@@ -10,6 +10,8 @@
  * 3. Máscara de Entrega: HCN + Ghost Lockers + Ghost Mailbox
  */
 
+import { ghostLocker } from "./ghostLocker";
+
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
 import { janusFinance } from "./janusFinance";
@@ -104,13 +106,8 @@ export class PhantomShopper {
   }
 
   private initDefaultLockers() {
-    const defaultLockers: GhostLocker[] = [
-      { id: "locker_001", name: "Ghost Locker - North Shopping", location: "Fortaleza, CE", lat: -3.7319, lng: -38.5162, availableSlots: 12, totalSlots: 20, nfcEnabled: true, isActive: true },
-      { id: "locker_002", name: "Ghost Locker - Iguatemi", location: "Fortaleza, CE", lat: -3.7584, lng: -38.4922, availableSlots: 8, totalSlots: 15, nfcEnabled: true, isActive: true },
-      { id: "locker_003", name: "Ghost Locker - Via Sul", location: "Fortaleza, CE", lat: -3.7750, lng: -38.4750, availableSlots: 15, totalSlots: 25, nfcEnabled: true, isActive: true },
-    ];
-
-    defaultLockers.forEach(locker => this.lockers.set(locker.id, locker));
+    // Lockers são gerenciados pelo GhostLockerManager real
+    // Este método mantém compatibilidade com código legado
   }
 
   // ─── Purchase Flow ───────────────────────────────────────────────────────
@@ -151,12 +148,23 @@ export class PhantomShopper {
       identity,
     );
 
-    // 4. Seleciona Ghost Locker
-    const locker = this.selectBestLocker();
+    // 4. Seleciona Ghost Locker (sistema real)
+    const availableLockers = ghostLocker.getAvailableLockers();
+    const locker = availableLockers.length > 0 ? availableLockers[0] : null;
     const deliveryAddress = locker ? locker.name : "Endereço HCN anônimo";
 
-    // 5. Gera NFC seal
-    const nfcSeal = this.generateNFCSeal();
+    // 5. Reserva slot + gera NFC seal real
+    let nfcSeal = "";
+    if (locker) {
+      const slot = ghostLocker.reserveSlot(locker.id, `phantom_${Date.now()}`);
+      if (slot) {
+        const seal = ghostLocker.generateSeal(`phantom_${Date.now()}`, locker.id, new Uint8Array(32));
+        nfcSeal = seal.hash;
+      }
+    }
+    if (!nfcSeal) {
+      nfcSeal = this.generateNFCSeal();
+    }
 
     // 6. Registra compra
     const purchase: GhostPurchase = {
@@ -239,16 +247,6 @@ export class PhantomShopper {
       amount: amount * rate,
       currency: to,
     };
-  }
-
-  // ─── Ghost Locker Selection ──────────────────────────────────────────────
-
-  private selectBestLocker(): GhostLocker | null {
-    const available = Array.from(this.lockers.values())
-      .filter(l => l.isActive && l.availableSlots > 0)
-      .sort((a, b) => b.availableSlots - a.availableSlots);
-
-    return available[0] || null;
   }
 
   // ─── NFC Seal ────────────────────────────────────────────────────────────

@@ -103,7 +103,7 @@ class QRNG {
 
     if (!result && (this.config.preferredSource === "ibm" || this.config.preferredSource === "anu")) {
       try {
-        result = await this.fetchFromIBM(bits);
+        result = await this.fetchFromIBM();
         console.log("[QRNG] Entropia obtida via IBM Quantum (quântica real)");
       } catch (err) {
         console.warn("[QRNG] IBM indisponível:", (err as Error).message);

@@ -14,7 +14,7 @@ import { sha3_256 } from "@noble/hashes/sha3.js";
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
 /** Fonte de aleatoriedade quântica */
-export type QRNGSource = "anu" | "ibm" | "local";
+export type QRNGSource = "anu" | "local";
 
 /** Resultado de uma geração de bytes quânticos */
 export interface QRNGResult {
@@ -36,10 +36,6 @@ export interface QRNGConfig {
   preferredSource: QRNGSource;
   /** Chave de API da ANU (opcional, ANU é gratuita sem chave) */
   anuApiKey?: string;
-  /** Chave de API da IBM Quantum */
-  ibmApiKey?: string;
-  /** Backend IBM preferido (ex: 'ibm_brisbane') */
-  ibmBackend?: string;
   /** Se deve cachear resultados */
   cacheEnabled: boolean;
   /** Idade máxima do cache em ms */
@@ -89,24 +85,15 @@ class QRNG {
       }
     }
 
-    // Tenta fonte preferida, fallback chain: anu → ibm → local
+    // Tenta fonte preferida, fallback chain: anu → local
     let result: QRNGResult | null = null;
 
-    if (this.config.preferredSource === "anu" || this.config.preferredSource === "ibm") {
+    if (this.config.preferredSource === "anu") {
       try {
         result = await this.fetchFromANU(bits);
         console.log("[QRNG] Entropia obtida via ANU (quântica real)");
       } catch {
-        console.warn("[QRNG] ANU indisponível, tentando IBM...");
-      }
-    }
-
-    if (!result && (this.config.preferredSource === "ibm" || this.config.preferredSource === "anu")) {
-      try {
-        result = await this.fetchFromIBM();
-        console.log("[QRNG] Entropia obtida via IBM Quantum (quântica real)");
-      } catch (err) {
-        console.warn("[QRNG] IBM indisponível:", (err as Error).message);
+        console.warn("[QRNG] ANU indisponível, usando fallback local...");
       }
     }
 
@@ -151,39 +138,6 @@ class QRNG {
   }
 
   /**
-   * Busca bytes aleatórios da IBM Quantum.
-   *
-   * Usa a API Qiskit Runtime para submeter um circuito quântico
-   * com portas Hadamard (superposição) e medir os qubits.
-   * Gratuito: 10 minutos por mês em hardware real.
-   *
-   * IMPORTANTE: Se a API key não estiver configurada, esta função
-   * LANÇA ERRO — o chamador faz fallback para local.
-   * NUNCA reporta quantumVerified=true sem hardware real.
-   */
-  private async fetchFromIBM(): Promise<QRNGResult> {
-    if (!this.config.ibmApiKey) {
-      throw new Error("IBM Quantum API key não configurada — use fonte local ou ANU");
-    }
-
-    // Integração real via Qiskit Runtime API
-    // Endpoint: https://auth.quantum-computing.ibm.com/api/v1/jobs
-    // Circuito: H-gate em cada qubit → medida → bits quânticos
-    //
-    // Para produção, implementar:
-    // 1. Autenticação com API key
-    // 2. Submissão de circuito QRNG (H⊗n → measure)
-    // 3. Polling do resultado
-    // 4. Extração dos bits medidos
-
-    // Sem implementação real: lança erro para forçar fallback
-    throw new Error(
-      "IBM Quantum: integração Qiskit Runtime não implementada. " +
-      "Configure ANU como fonte ou aguarde implementação completa.",
-    );
-  }
-
-  /**
    * Fallback local — crypto.getRandomValues().
    *
    * Não é quântico, mas é criptograficamente seguro
@@ -218,11 +172,10 @@ class QRNG {
   /**
    * Verifica quais fontes quânticas estão disponíveis.
    *
-   * Testa conectividade com ANU e presença de chave IBM.
+   * Testa conectividade com ANU.
    */
-  async checkSources(): Promise<{ anu: boolean; ibm: boolean }> {
+  async checkSources(): Promise<{ anu: boolean }> {
     let anu = false;
-    let ibm = false;
 
     try {
       const resp = await fetch(
@@ -232,9 +185,7 @@ class QRNG {
       anu = resp.ok;
     } catch { /* ANU indisponível */ }
 
-    ibm = !!this.config.ibmApiKey;
-
-    return { anu, ibm };
+    return { anu };
   }
 
   /** Atualiza configuração do QRNG */

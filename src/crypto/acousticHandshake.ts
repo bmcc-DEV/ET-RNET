@@ -13,7 +13,7 @@
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
-import { ed25519 } from "@noble/curves/ed25519.js";
+import { x25519 } from "@noble/curves/ed25519.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { secureRandomId } from "../utils/secureRandom";
 
@@ -22,7 +22,8 @@ import { secureRandomId } from "../utils/secureRandom";
 export interface HandshakeSession {
   id: string;
   status: "initiating" | "waiting" | "completed" | "failed";
-  localPublicKey: Uint8Array;
+  localPublicKey: Uint8Array;     // X25519 public key
+  localSecretKey: Uint8Array;     // X25519 secret key
   remotePublicKey: Uint8Array | null;
   sharedSecret: Uint8Array | null;
   createdAt: number;
@@ -45,16 +46,17 @@ class AcousticHandshake {
 
   private constructor() {}
 
-  /** Inicia um handshake — gera par de chaves efêmero */
+  /** Inicia um handshake — gera par de chaves X25519 efêmero */
   initiate(): HandshakeSession {
     const id = `hs_${secureRandomId(8)}`;
-    const privateKey = ed25519.utils.randomSecretKey();
-    const publicKey = ed25519.getPublicKey(privateKey);
+    const secretKey = x25519.utils.randomSecretKey();
+    const publicKey = x25519.getPublicKey(secretKey);
 
     const session: HandshakeSession = {
       id,
       status: "initiating",
       localPublicKey: publicKey,
+      localSecretKey: secretKey,
       remotePublicKey: null,
       sharedSecret: null,
       createdAt: Date.now(),
@@ -67,22 +69,23 @@ class AcousticHandshake {
     return session;
   }
 
-  /** Processa chave pública remota recebida */
+  /** Processa chave pública remota recebida — X25519 ECDH real */
   receiveRemoteKey(sessionId: string, remotePublicKey: Uint8Array): boolean {
     const session = this.sessions.get(sessionId);
     if (!session || session.status !== "initiating") return false;
 
     session.remotePublicKey = remotePublicKey;
 
-    // Deriva shared secret via ECDH
-    // Para Ed25519, usaríamos X25519 para ECDH — simplificado aqui
-    const combined = new Uint8Array(session.localPublicKey.length + remotePublicKey.length);
-    combined.set(session.localPublicKey, 0);
-    combined.set(remotePublicKey, session.localPublicKey.length);
+    // X25519 Diffie-Hellman real
+    const sharedSecret = x25519.getSharedSecret(session.localSecretKey, remotePublicKey);
 
-    session.sharedSecret = sha3_256(combined) as Uint8Array;
+    // Derivar chave simétrica via SHA3-256 do shared secret
+    session.sharedSecret = sha3_256(sharedSecret) as Uint8Array;
     session.status = "completed";
     session.completedAt = Date.now();
+
+    // Limpar chave secreta local
+    session.localSecretKey.fill(0);
 
     this.notify(session);
     return true;

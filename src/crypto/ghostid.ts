@@ -2,12 +2,15 @@ import init, { derive_ghost_id, init_void_core } from "void_core";
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { generateQuantumEntropy } from "./quantumBridge";
+import { x25519 } from "@noble/curves/ed25519.js";
 
 // --- Types ---
 export interface GhostIdentity {
   handle: string;
-  publicKey: Uint8Array;
-  privateKey: Uint8Array;
+  publicKey: Uint8Array;        // Ed25519 public key (identity)
+  privateKey: Uint8Array;       // Ed25519 seed (zeroed after spawn)
+  x25519PublicKey: Uint8Array;  // X25519 public key (for ECDH)
+  x25519SecretKey: Uint8Array;  // X25519 secret key (for ECDH, zeroed after spawn)
   entropyBits: number;
   quantumVerified: boolean; // Flag: QRNG via vHGPU
 }
@@ -188,21 +191,29 @@ export async function spawnGhostId(
   // Call Rust/WASM Core with derived entropy
   const idWasm = derive_ghost_id(new Uint8Array(derivedEntropy));
 
+  // Generate X25519 keypair for ECDH (Double Ratchet)
+  const x25519Secret = x25519.utils.randomSecretKey();
+  const x25519Public = x25519.getPublicKey(x25519Secret);
+
   if (onProgress) onProgress({ stage: "complete", detail: `Handle gerado: ${idWasm.handle}${quantumVerified ? " [QM]" : ""}`, elapsed: performance.now() - t0 });
 
   return {
     handle: idWasm.handle,
     publicKey: idWasm.public_key,
     privateKey: new Uint8Array(32), // WASM não expõe a chave privada (design de segurança intencional)
+    x25519PublicKey: x25519Public,
+    x25519SecretKey: x25519Secret,
     entropyBits: 512 + bioEntropy.keystrokeDynamics.length * 8 + (quantumVerified ? 256 : 0),
     quantumVerified,
   };
 }
 
 export function destroyGhostId(id: GhostIdentity): void {
-  // Overwrite local refs
+  // Overwrite local refs — zero all key material
   if (id.privateKey) id.privateKey.fill(0);
   if (id.publicKey) id.publicKey.fill(0);
+  if (id.x25519SecretKey) id.x25519SecretKey.fill(0);
+  if (id.x25519PublicKey) id.x25519PublicKey.fill(0);
   id.handle = "void_◆_destroyed";
 }
 

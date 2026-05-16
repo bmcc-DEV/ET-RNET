@@ -59,6 +59,23 @@ const DoubleSpendDefenseLab = lazy(() => import("./components/DoubleSpendDefense
 const AntiSybilLab = lazy(() => import("./components/AntiSybilLab"));
 const TemporalOracleLab = lazy(() => import("./components/TemporalOracleLab"));
 
+// === HEADLESS MODULES (Cap. 13) ===
+const QRNGPanel = lazy(() => import("./components/QRNGPanel"));
+const NostrOraclePanel = lazy(() => import("./components/NostrOraclePanel"));
+const SocialRecoveryPanel = lazy(() => import("./components/SocialRecoveryPanel"));
+const AcousticHandshakePanel = lazy(() => import("./components/AcousticHandshakePanel"));
+const SphinxMixnetPanel = lazy(() => import("./components/SphinxMixnetPanel"));
+const DifferentialCorePanel = lazy(() => import("./components/DifferentialCorePanel"));
+const PaymentGatewayPanel = lazy(() => import("./components/PaymentGatewayPanel"));
+const PaleoYieldPanel = lazy(() => import("./components/PaleoYieldPanel"));
+const NostrDEXPanel = lazy(() => import("./components/NostrDEXPanel"));
+const HGPUComputePanel = lazy(() => import("./components/HGPUComputePanel"));
+const GhostMailboxPanel = lazy(() => import("./components/GhostMailboxPanel"));
+const OctreeSDFPanel = lazy(() => import("./components/OctreeSDFPanel"));
+const NostrSyncPanel = lazy(() => import("./components/NostrSyncPanel"));
+const GhostLockerPanel = lazy(() => import("./components/GhostLockerPanel"));
+const GPUMiningPanel = lazy(() => import("./components/GPUMiningPanel"));
+
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center h-32 text-zinc-600 font-mono text-xs">
@@ -186,6 +203,23 @@ export default function App() {
           {/* === SOCIAL & PALEO === */}
           <SocialFabricPanel />
           <CryptoTestamentLab />
+
+          {/* === HEADLESS MODULES (Cap. 13) === */}
+          <QRNGPanel />
+          <NostrOraclePanel />
+          <SocialRecoveryPanel />
+          <AcousticHandshakePanel />
+          <SphinxMixnetPanel />
+          <DifferentialCorePanel />
+          <PaymentGatewayPanel />
+          <PaleoYieldPanel />
+          <NostrDEXPanel />
+          <HGPUComputePanel />
+          <GhostMailboxPanel />
+          <OctreeSDFPanel />
+          <NostrSyncPanel />
+          <GhostLockerPanel />
+          <GPUMiningPanel />
 
           {/* === INFRAESTRUTURA === */}
           <Guarantees />

@@ -31,6 +31,7 @@ export default function Nav() {
     { href: "#dao", label: "DAO" },
     { href: "#pow-faucet", label: "FAUCET" },
     { href: "#farm", label: "FARM" },
+    { href: "#qrng-panel", label: "MODULES" },
   ];
   return (
     <header className="sticky top-0 z-50 border-b border-[#14181c] bg-black/70 backdrop-blur-md">

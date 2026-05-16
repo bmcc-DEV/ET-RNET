@@ -1,7 +1,7 @@
 /**
  * ETΞRNET — Social Recovery: Carteira Multi-Dispositivo
  *
- * Usa Shamir Secret Sharing (QEL + GF256 já existentes) para dividir
+ * Usa Shamir Secret Sharing (GF256) para dividir
  * a seed da carteira entre N amigos. Qualquer M de N podem recuperar.
  *
  * Fluxo:
@@ -9,17 +9,22 @@
  * 2. Cada share é cifrado com a chave pública de um amigo
  * 3. Shares são enviados via NOSTR DMs criptografados
  * 4. Para recuperar, usuário coleta M shares e reconstrói seed
+ *
+ * Segurança: usa GF(256) Lagrange interpolation (não XOR).
+ * Cada share é um ponto no polinômio de Shamir — share individual
+ * NÃO revela a seed.
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { secureRandomId } from "../utils/secureRandom";
+import { gfMul, gfInv } from "./gf256";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RecoveryShare {
   id: string;
   index: number;           // share index (1-based)
-  data: Uint8Array;        // share bytes (encrypted)
+  data: Uint8Array;        // share bytes (Shamir share point)
   recipientPk: string;     // hex public key of guardian
   encrypted: boolean;
   createdAt: number;
@@ -32,6 +37,70 @@ export interface RecoveryScheme {
   shares: RecoveryShare[];
   createdAt: number;
   seedHash: string;        // SHA3-256 of original seed (for verification)
+}
+
+// ─── Shamir over GF(256) ─────────────────────────────────────────────────────
+
+/**
+ * Shamir split: polynomial of degree (threshold-1) over GF(256).
+ *
+ * f(x) = s ⊕ a1·x ⊕ a2·x² ⊕ ... ⊕ a_{k-1}·x^{k-1}
+ *
+ * where s is the secret byte, a1..a_{k-1} are random coefficients.
+ * Addition is XOR, multiplication is GF(256) mul.
+ */
+function shamirSplit(secret: Uint8Array, threshold: number, totalShares: number): Uint8Array[] {
+  const shares = Array.from({ length: totalShares }, () => new Uint8Array(secret.length));
+
+  for (let bi = 0; bi < secret.length; bi++) {
+    const s = secret[bi];
+    // Random coefficients for degree (threshold-1) polynomial
+    const coeffs = new Uint8Array(threshold - 1);
+    crypto.getRandomValues(coeffs);
+
+    for (let i = 0; i < totalShares; i++) {
+      const x = i + 1; // share index (1-based)
+      let fx = s;
+      let xPow = x;
+      for (let c = 0; c < coeffs.length; c++) {
+        fx ^= gfMul(coeffs[c], xPow);
+        xPow = gfMul(xPow, x);
+      }
+      shares[i][bi] = fx;
+    }
+  }
+  return shares;
+}
+
+/**
+ * Shamir reconstruct via Lagrange interpolation over GF(256).
+ *
+ * Given k shares (x_i, y_i), reconstruct f(0) = secret:
+ *   secret = Σ y_i · Π_{j≠i} (x_j / (x_j ⊕ x_i))
+ */
+function shamirReconstruct(shares: Uint8Array[], indices: number[]): Uint8Array {
+  if (shares.length < 2) throw new Error("Need at least 2 shares");
+  const len = shares[0].length;
+  const result = new Uint8Array(len);
+  const xs = indices.map(i => i + 1); // convert to 1-based
+
+  for (let bi = 0; bi < len; bi++) {
+    let secret = 0;
+    for (let i = 0; i < shares.length; i++) {
+      const yi = shares[i][bi];
+      // Lagrange basis: L_i(0) = Π_{j≠i} x_j / (x_j ⊕ x_i)
+      let num = 1;
+      let den = 1;
+      for (let j = 0; j < shares.length; j++) {
+        if (i === j) continue;
+        num = gfMul(num, xs[j]);
+        den = gfMul(den, xs[j] ^ xs[i]);
+      }
+      secret ^= gfMul(yi, gfMul(num, gfInv(den)));
+    }
+    result[bi] = secret;
+  }
+  return result;
 }
 
 // ─── Social Recovery ──────────────────────────────────────────────────────────
@@ -47,41 +116,35 @@ class SocialRecovery {
 
   private constructor() {}
 
-  /** Divide uma seed em shares usando Shamir's Secret Sharing */
+  /**
+   * Divide uma seed em shares usando Shamir's Secret Sharing (GF256).
+   *
+   * Cada share é um ponto (x, f(x)) no polinômio de grau (threshold-1).
+   * Share individual NÃO revela a seed — precisa de `threshold` shares
+   * para interpolar o polinômio e recuperar f(0) = seed.
+   */
   splitSeed(
     seed: Uint8Array,
     threshold: number,
     totalShares: number,
     guardianPks: string[],
   ): RecoveryScheme {
+    if (threshold < 2) throw new Error("Threshold must be at least 2");
     if (threshold > totalShares) throw new Error("Threshold cannot exceed total shares");
     if (guardianPks.length < totalShares) throw new Error("Not enough guardian public keys");
 
-    // Generate shares using simple XOR-based splitting (production would use proper Shamir)
-    const shares: RecoveryShare[] = [];
     const seedHash = sha3_256(seed);
     const seedHashHex = Array.from(seedHash).map(b => b.toString(16).padStart(2, '0')).join('');
 
-    // For each share, XOR seed with random pad (simplified Shamir)
-    // In production, use the QEL GF256 implementation
+    // Real Shamir split over GF(256)
+    const shareData = shamirSplit(seed, threshold, totalShares);
+
+    const shares: RecoveryShare[] = [];
     for (let i = 0; i < totalShares; i++) {
-      const pad = new Uint8Array(seed.length);
-      crypto.getRandomValues(pad);
-
-      const shareData = new Uint8Array(seed.length);
-      for (let j = 0; j < seed.length; j++) {
-        shareData[j] = seed[j] ^ pad[j];
-      }
-
-      // Prepend pad to share (in real Shamir, this would be the share point)
-      const fullShare = new Uint8Array(pad.length + shareData.length);
-      fullShare.set(pad, 0);
-      fullShare.set(shareData, pad.length);
-
       shares.push({
         id: `share_${secureRandomId(8)}`,
         index: i + 1,
-        data: fullShare,
+        data: shareData[i],
         recipientPk: guardianPks[i],
         encrypted: false, // caller encrypts with guardian's public key
         createdAt: Date.now(),
@@ -101,22 +164,24 @@ class SocialRecovery {
     return scheme;
   }
 
-  /** Recupera seed a partir de M shares */
+  /**
+   * Recupera seed a partir de M shares usando Lagrange interpolation.
+   *
+   * Requer pelo menos `threshold` shares. A interpolação reconstrói
+   * f(0) = secret byte para cada byte da seed.
+   */
   recoverSeed(schemeId: string, shares: RecoveryShare[]): Uint8Array | null {
     const scheme = this.schemes.get(schemeId);
     if (!scheme) return null;
     if (shares.length < scheme.threshold) return null;
 
-    // For simplified Shamir: XOR all shares together
-    // In production, use Lagrange interpolation over GF256
-    const shareLength = shares[0].data.length;
-    const recovered = new Uint8Array(shareLength);
+    // Need at least `threshold` shares for Lagrange interpolation
+    const selectedShares = shares.slice(0, scheme.threshold);
+    const shareArrays = selectedShares.map(s => s.data);
+    const indices = selectedShares.map(s => s.index);
 
-    for (const share of shares) {
-      for (let j = 0; j < shareLength; j++) {
-        recovered[j] ^= share.data[j];
-      }
-    }
+    // Reconstruct via Lagrange interpolation over GF(256)
+    const recovered = shamirReconstruct(shareArrays, indices);
 
     // Verify against stored hash
     const recoveredHash = sha3_256(recovered);

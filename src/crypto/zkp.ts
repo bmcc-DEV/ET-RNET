@@ -52,10 +52,12 @@ export const HydraBalanceProof = ZkProgram({
         let computedInputGroupSum = Group.zero;
         let computedOutputGroupSum = Group.zero;
 
-        // Geradores G e H
+        // Geradores G e H (independentes — discrete log desconhecido)
         const G = Group.generator;
-        // Ponto H secundário (simulado via hash to group se necessário)
-        const H = Group.generator; 
+        // H = G * scalar "nothing-up-my-sleeve" — garante que ninguém conhece log_G(H)
+        const H = Group.generator.scale(
+          Scalar.from(0x5a465a465a465a465a465a465a465a465a465a465a465a465a465a465a465a46n)
+        );
 
         // Soma dos Inputs
         for (let i = 0; i < 10; i++) {

@@ -257,11 +257,11 @@ export function validateTransaction(
 
       cryptoVerified = true;
     } catch (e) {
-      // WASM não inicializado — aceita validação básica (nullifiers + estrutura)
-      console.warn(
-        "[NostrTx] Verificação criptográfica pulada (WASM não disponível):",
-        e instanceof Error ? e.message : e
-      );
+      // WASM não inicializado — rejeita transação (sem verificação cripto = sem confiança)
+      return {
+        valid: false,
+        error: `Verificação criptográfica falhou (WASM não disponível): ${e instanceof Error ? e.message : e}`,
+      };
     }
 
     // 3. Verifica ML-DSA signature (pós-quântica)
@@ -290,7 +290,11 @@ export function validateTransaction(
         console.log("[NostrTx] Assinatura ML-DSA verificada com sucesso");
       }
     } catch (e) {
-      console.warn("[NostrTx] Verificação ML-DSA pulada:", e instanceof Error ? e.message : e);
+      // ML-DSA verification failure — rejeita transação
+      return {
+        valid: false,
+        error: `Verificação ML-DSA falhou: ${e instanceof Error ? e.message : e}`,
+      };
     }
 
     if (cryptoVerified) {

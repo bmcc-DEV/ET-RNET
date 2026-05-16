@@ -421,7 +421,7 @@ function serializeHeader(msg: RatchetMessage): Uint8Array {
     msg.dhPublicKey,
     new Uint8Array([(msg.previousChainLength >> 8) & 0xff, msg.previousChainLength & 0xff]),
     new Uint8Array([(msg.messageNumber >> 8) & 0xff, msg.messageNumber & 0xff]),
-    msg.ciphertext.slice(0, 32), // First 32 bytes for signing (not full ciphertext for performance)
+    msg.ciphertext, // Full ciphertext for integrity (signature covers everything)
   ];
   return concatBuffers(...parts);
 }

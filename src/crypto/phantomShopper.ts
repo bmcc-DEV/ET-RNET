@@ -11,6 +11,7 @@
  */
 
 import { ghostLocker } from "./ghostLocker";
+import { paymentGateway, type PaymentResult } from "./paymentGateway";
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
@@ -141,7 +142,18 @@ export class PhantomShopper {
       itemPrice, currency, "BRL"
     );
 
-    // 3. Gera cartão virtual descartável (Janus Finance)
+    // 3. Processa pagamento via Payment Request API ou Stripe
+    const paymentResult: PaymentResult = await paymentGateway.pay({
+      label: `${marketplaceName} — ${itemDescription}`,
+      amount: convertedAmount.toFixed(2),
+      currency: convertedCurrency,
+    });
+
+    if (!paymentResult.success) {
+      throw new Error(`Pagamento falhou: ${paymentResult.error}`);
+    }
+
+    // 4. Gera cartão virtual descartável (Janus Finance)
     const virtualCard = janusFinance.generateVirtualCard(
       BigInt(Math.ceil(convertedAmount * 100)), // Centavos
       convertedCurrency,

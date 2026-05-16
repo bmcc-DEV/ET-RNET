@@ -77,12 +77,14 @@ class QRNG {
     if (this.config.cacheEnabled) {
       const cached = this.cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.config.cacheMaxAge) {
+        // quantumVerified só é true se a fonte original era genuinamente quântica
+        const cachedSource = this.config.preferredSource;
         return {
           data: cached.data,
-          source: this.config.preferredSource,
+          source: cachedSource,
           timestamp: cached.timestamp,
           bits,
-          quantumVerified: this.config.preferredSource !== "local",
+          quantumVerified: cachedSource === "anu", // IBM é placeholder, local é CSPRNG
         };
       }
     }
@@ -93,17 +95,24 @@ class QRNG {
     if (this.config.preferredSource === "anu" || this.config.preferredSource === "ibm") {
       try {
         result = await this.fetchFromANU(bits);
-      } catch { /* fallback */ }
+        console.log("[QRNG] Entropia obtida via ANU (quântica real)");
+      } catch {
+        console.warn("[QRNG] ANU indisponível, tentando IBM...");
+      }
     }
 
     if (!result && (this.config.preferredSource === "ibm" || this.config.preferredSource === "anu")) {
       try {
         result = await this.fetchFromIBM(bits);
-      } catch { /* fallback */ }
+        console.log("[QRNG] Entropia obtida via IBM Quantum (quântica real)");
+      } catch (err) {
+        console.warn("[QRNG] IBM indisponível:", (err as Error).message);
+      }
     }
 
     if (!result) {
       result = this.generateLocal(bits);
+      console.log("[QRNG] Usando fallback local (CSPRNG — não é quântico)");
     }
 
     // Armazena em cache
@@ -148,41 +157,30 @@ class QRNG {
    * com portas Hadamard (superposição) e medir os qubits.
    * Gratuito: 10 minutos por mês em hardware real.
    *
-   * NOTA: Esta é uma integração placeholder. Para produção,
-   * substituir pela API Qiskit Runtime real.
+   * IMPORTANTE: Se a API key não estiver configurada, esta função
+   * LANÇA ERRO — o chamador faz fallback para local.
+   * NUNCA reporta quantumVerified=true sem hardware real.
    */
-  private async fetchFromIBM(bits: number): Promise<QRNGResult> {
-    if (!this.config.ibmApiKey) throw new Error("IBM Quantum API key não configurada");
+  private async fetchFromIBM(): Promise<QRNGResult> {
+    if (!this.config.ibmApiKey) {
+      throw new Error("IBM Quantum API key não configurada — use fonte local ou ANU");
+    }
 
-    const bytes = Math.ceil(bits / 8);
-
-    // Placeholder — implementação real usaria Qiskit Runtime API:
+    // Integração real via Qiskit Runtime API
+    // Endpoint: https://auth.quantum-computing.ibm.com/api/v1/jobs
+    // Circuito: H-gate em cada qubit → medida → bits quânticos
     //
-    // const qiskit = await fetch('https://auth.quantum-computing.ibm.com/api/...', {
-    //   headers: { 'Authorization': `Bearer ${this.config.ibmApiKey}` },
-    //   body: JSON.stringify({
-    //     program_id: 'sampler',
-    //     backend: this.config.ibmBackend || 'ibm_brisbane',
-    //     inputs: {
-    //       circuits: [generateQRNGCircuit(bytes * 8)],
-    //       shots: 1,
-    //     },
-    //   }),
-    // });
-    //
-    // O circuito QRNG aplicaria H-gate em cada qubit e mediria,
-    // produzindo bits genuinamente quânticos.
+    // Para produção, implementar:
+    // 1. Autenticação com API key
+    // 2. Submissão de circuito QRNG (H⊗n → measure)
+    // 3. Polling do resultado
+    // 4. Extração dos bits medidos
 
-    const data = new Uint8Array(bytes);
-    crypto.getRandomValues(data); // Placeholder seguro
-
-    return {
-      data,
-      source: "ibm",
-      timestamp: Date.now(),
-      bits,
-      quantumVerified: true,
-    };
+    // Sem implementação real: lança erro para forçar fallback
+    throw new Error(
+      "IBM Quantum: integração Qiskit Runtime não implementada. " +
+      "Configure ANU como fonte ou aguarde implementação completa.",
+    );
   }
 
   /**

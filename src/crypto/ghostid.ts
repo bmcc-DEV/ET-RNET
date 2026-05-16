@@ -128,11 +128,17 @@ export async function spawnGhostId(
 
   try {
     const qrngResult = await generateQuantumEntropy(256);
-    quantumEntropy = new Uint8Array(
-      qrngResult.entropy_hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16))
-    );
-    quantumVerified = true;
-    console.log("[GhostID] CQR QRNG obtido via Bell states");
+    if (qrngResult) {
+      quantumEntropy = new Uint8Array(
+        qrngResult.entropy_hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16))
+      );
+      quantumVerified = true;
+      console.log("[GhostID] CQR QRNG obtido via Bell states");
+    } else {
+      console.warn("[GhostID] Servidor quântico offline, usando CSPRNG");
+      quantumEntropy = new Uint8Array(32);
+      crypto.getRandomValues(quantumEntropy);
+    }
   } catch (e) {
     console.warn("[GhostID] CQR engine indisponível, usando CSPRNG");
     quantumEntropy = new Uint8Array(32);

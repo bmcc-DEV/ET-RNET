@@ -48,7 +48,7 @@ class AcousticHandshake {
   /** Inicia um handshake — gera par de chaves efêmero */
   initiate(): HandshakeSession {
     const id = `hs_${secureRandomId(8)}`;
-    const privateKey = ed25519.utils.randomPrivateKey();
+    const privateKey = ed25519.utils.randomSecretKey();
     const publicKey = ed25519.getPublicKey(privateKey);
 
     const session: HandshakeSession = {
@@ -124,13 +124,13 @@ class AcousticHandshake {
 
   /** Formata chave pública para transmissão acústica (base64) */
   formatForTransmission(publicKey: Uint8Array): string {
-    return btoa(String.fromCharCode(...publicKey));
+    return btoa(String.fromCharCode(...Array.from(publicKey)));
   }
 
   /** Parseia chave pública recebida via transmissão acústica */
   parseFromTransmission(data: string): Uint8Array {
     const binary = atob(data);
-    return new Uint8Array([...binary].map(c => c.charCodeAt(0)));
+    return new Uint8Array(Array.from(binary).map(c => c.charCodeAt(0)));
   }
 
   /** Inscreve-se em eventos de handshake */
@@ -150,7 +150,7 @@ class AcousticHandshake {
   }
 
   private notify(session: HandshakeSession): void {
-    for (const listener of this.listeners) {
+    for (const listener of Array.from(this.listeners)) {
       try { listener(session); } catch { /* ignore */ }
     }
   }

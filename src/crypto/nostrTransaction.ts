@@ -118,6 +118,32 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 /**
+ * Serialização canônica determinística para assinaturas criptográficas.
+ *
+ * JSON.stringify não garante ordem das chaves — V8 e SpiderMonkey podem
+ * produzir JSONs diferentes para o mesmo objeto, quebrando assinaturas.
+ *
+ * Esta função ordena as chaves recursivamente e serializa em ordem alfabética.
+ */
+function canonicalStringify(obj: unknown): string {
+  if (obj === null || obj === undefined) return String(obj);
+  if (typeof obj === "string" || typeof obj === "number" || typeof obj === "boolean") {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return `[${obj.map(canonicalStringify).join(",")}]`;
+  }
+  if (typeof obj === "object") {
+    const sortedKeys = Object.keys(obj as Record<string, unknown>).sort();
+    const pairs = sortedKeys.map(
+      k => `${JSON.stringify(k)}:${canonicalStringify((obj as Record<string, unknown>)[k])}`
+    );
+    return `{${pairs.join(",")}}`;
+  }
+  return String(obj);
+}
+
+/**
  * Cria um envelope NOSTR para transação ETRNET.
  * O chamador deve assinar com sua chave NOSTR usando nostr-tools.
  *
@@ -128,7 +154,7 @@ export function createTransactionEvent(
   txData: ETRTransactionData
 ): NostrTransaction {
   const txIdHash = sha3_256(
-    new TextEncoder().encode(JSON.stringify(txData))
+    new TextEncoder().encode(canonicalStringify(txData))
   );
   const txIdHex = Array.from(txIdHash)
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -143,7 +169,7 @@ export function createTransactionEvent(
       ...txData.nullifiers.map((n) => ["nullifier", n]),
       ["txid", txIdHex],
     ],
-    content: JSON.stringify(txData),
+    content: canonicalStringify(txData),
     created_at: Math.floor(Date.now() / 1000),
   };
 }
@@ -268,7 +294,8 @@ export function validateTransaction(
     try {
       if (txData.signature && txData.signature.length > 0 && txData.senderPubKey) {
         // A assinatura cobre o conteúdo serializado (sem a própria assinatura e sem senderPubKey)
-        const signedContent = JSON.stringify({
+        // Usa serialização canônica determinística — JSON.stringify não garante ordem de chaves
+        const signedContent = canonicalStringify({
           inputs: txData.inputs,
           outputs: txData.outputs,
           rangeProofs: txData.rangeProofs,
@@ -341,7 +368,7 @@ export function processIncomingTransaction(
 
   // Registra todos os nullifiers
   const txIdHash = sha3_256(
-    new TextEncoder().encode(JSON.stringify(txData))
+    new TextEncoder().encode(canonicalStringify(txData))
   );
   const txId = Array.from(txIdHash)
     .map((b) => b.toString(16).padStart(2, "0"))

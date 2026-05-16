@@ -15,7 +15,52 @@
  * - Nostr Wallet Connect (NWC) — descentralizado via Nostr
  */
 
-import { secureRandomInt } from "../utils/secureRandom";
+
+// ─── Bech32 Encoding (BIP173) ────────────────────────────────────────────────
+
+function expandHrp(hrp: string): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < hrp.length; i++) {
+    result.push(hrp.charCodeAt(i) >>> 5);
+  }
+  result.push(0);
+  for (let i = 0; i < hrp.length; i++) {
+    result.push(hrp.charCodeAt(i) & 31);
+  }
+  return result;
+}
+
+function bech32Polymod(values: number[]): number {
+  const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let chk = 1;
+  for (const v of values) {
+    const b = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    for (let i = 0; i < 5; i++) {
+      chk ^= ((b >>> i) & 1) ? GEN[i] : 0;
+    }
+  }
+  return chk;
+}
+
+function convertBits(data: number[], fromBits: number, toBits: number, pad: boolean): number[] {
+  let acc = 0;
+  let bits = 0;
+  const result: number[] = [];
+  const maxv = (1 << toBits) - 1;
+  for (const value of data) {
+    acc = (acc << fromBits) | value;
+    bits += fromBits;
+    while (bits >= toBits) {
+      bits -= toBits;
+      result.push((acc >>> bits) & maxv);
+    }
+  }
+  if (pad && bits > 0) {
+    result.push((acc << (toBits - bits)) & maxv);
+  }
+  return result;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -57,13 +102,15 @@ class LightningPayment {
   }
 
   private generateBolt11(amount: number, _label: string): string {
-    // BOLT11 invoice format (simplificado)
-    // Em produção, usar biblioteca lnbits ou lnd
+    // BOLT11 invoice format — demonstração.
+    // Para produção real: integrar com LND/CLN via gRPC/REST ou NWC.
+    // Formato: lnbc + amount + timestamp_base36 + payment_hash_hex
+    // Nota: sem nó Lightning real, o invoice é apenas para demonstração UI.
     const prefix = "lnbc";
-    const amountStr = amount.toString(16).padStart(4, "0");
+    const amountStr = amount > 0 ? `${amount}` : "";
     const timestamp = Math.floor(Date.now() / 1000).toString(36);
     const hash = this.generateHash().slice(0, 32);
-    return `${prefix}${amountStr}${timestamp}${hash}`;
+    return `${prefix}${amountStr}1${timestamp}${hash}`;
   }
 
   private generateHash(): string {
@@ -100,15 +147,38 @@ class BitcoinPayment {
     this.address = this.generateAddress();
   }
 
+  /**
+   * Gera endereço Bitcoin Bech32 real (P2WPKH, witness v0).
+   *
+   * Formato: bc1q + 32 chars bech32 (20 bytes witness program + 6 bytes checksum)
+   * Segue BIP173: https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki
+   */
   private generateAddress(): string {
-    // Gerar endereço Bitcoin (bech32/segwit)
-    // Em produção, usar bitcoinjs-lib ou ecpair
-    const chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let addr = "bc1q";
-    for (let i = 0; i < 38; i++) {
-      addr += chars[secureRandomInt(chars.length)];
+    // Bech32 character set (BIP173)
+    const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+    // Generate 20 random bytes as witness program (P2WPKH)
+    const witnessProgram = crypto.getRandomValues(new Uint8Array(20));
+
+    // Convert 8-bit groups to 5-bit groups (bech32 encoding)
+    const data = convertBits(Array.from(witnessProgram), 8, 5, true);
+
+    // Witness version 0 + data
+    const values = [0, ...data];
+
+    // Compute bech32 checksum
+    const hrp = "bc";
+    const polymod = bech32Polymod(
+      expandHrp(hrp).concat(values).concat([0, 0, 0, 0, 0, 0])
+    ) ^ 1; // GEN = 1 for bech32
+
+    const checksum: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      checksum.push((polymod >>> (5 * (5 - i))) & 31);
     }
-    return addr;
+
+    // Encode: hrp + "1" + data + checksum
+    return hrp + "1" + [...values, ...checksum].map(v => CHARSET[v]).join("");
   }
 
   getAddress(): string {

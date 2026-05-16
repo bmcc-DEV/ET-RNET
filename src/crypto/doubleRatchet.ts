@@ -214,16 +214,12 @@ export function initializeRatchetAsBob(
   localSPK: DHKeyPair,
   localOPK?: DHKeyPair,
 ): RatchetState {
-  // Reconstruct X3DH shared secret
-  // DH1 = X25519(SPKb, IKa) — Alice's identity as X25519
+  // X3DH from Bob's side (mirrors Alice's computation):
+  // DH1' = X25519(SPKb_priv, IKa_pub) — Bob's SPK, Alice's identity key
+  // DH2' = X25519(IKb_priv, EKa_pub)  — Bob's identity, Alice's ephemeral
+  // DH3' = X25519(SPKb_priv, EKa_pub) — Bob's SPK, Alice's ephemeral
+  // By ECDH commutativity: X25519(a,B) = X25519(b,A), so DH1=DH1', DH2=DH2', DH3=DH3'
   const dh1 = dh(localIdentityKey, localSPK);
-  // DH2 = X25519(IKa, EKa) — not quite right, but for symmetric X3DH:
-  // Actually: DH2 = X25519(IKa_priv, EKa_pub) — but Bob doesn't have Alice's private key
-  // In X3DH, Bob computes: DH1=SPKa, DH2=IKa, DH3=EKa from his side
-  // The correct X3DH from Bob's side:
-  // DH1' = X25519(SPKb_priv, IKa_pub)
-  // DH2' = X25519(IKb_priv, EKa_pub)
-  // DH3' = X25519(SPKb_priv, EKa_pub)
   const dh2 = dh(aliceEphemeralKey, { publicKey: localIdentityKey, secretKey: localSigningKey });
   const dh3 = dh(aliceEphemeralKey, localSPK);
 

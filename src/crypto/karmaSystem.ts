@@ -106,13 +106,23 @@ const wasmKarmaCore = {
 
   /**
    * Combina múltiplos tokens em um (CoinJoin-like) para aumentar anonimato.
+   *
+   * Segurança: exige que cada token de entrada tenha commitment Pedersen válido.
+   * Tokens com commitment inválido são rejeitados antes de combinar.
    */
   combineTokens(tokens: BlindKarmaToken[]): BlindKarmaToken {
+    // Validar que todos os tokens de entrada têm Pedersen commitment genuíno
+    for (const token of tokens) {
+      if (!this.verifyCommitment(token.commitment, token.amount, token.blindingFactor)) {
+        throw new Error(`Token ${token.id} tem commitment inválido — rejeitado`);
+      }
+    }
+
     const totalAmount = tokens.reduce((sum, t) => sum + t.amount, 0);
     const newBlinding = randomBytes(32);
     const newCommitment = this.generateCommitment(totalAmount, newBlinding);
     const newId = `bkt_${Date.now()}_${secureRandomInt(10000)}`;
-    
+
     return {
       id: newId,
       amount: totalAmount,
@@ -129,8 +139,13 @@ const wasmKarmaCore = {
 
   /**
    * Divide um token em múltiplos (para pagamentos parciais).
+   *
+   * Segurança: exige commitment válido no token de entrada.
    */
   splitToken(token: BlindKarmaToken, amounts: number[]): BlindKarmaToken[] {
+    if (!this.verifyCommitment(token.commitment, token.amount, token.blindingFactor)) {
+      throw new Error(`Token ${token.id} tem commitment inválido — rejeitado`);
+    }
     const total = amounts.reduce((a, b) => a + b, 0);
     if (total > token.amount) throw new Error("Split excede valor do token");
 

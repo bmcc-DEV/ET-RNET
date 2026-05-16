@@ -177,7 +177,7 @@ export default function ChimeraExchangePanel() {
                     <span className={order.side === "BUY" ? "text-[#b6ff3a]" : "text-[#ff3ad9]"}>
                       {order.side}
                     </span>
-                    <span className="text-zinc-400">{order.amount} @ ${order.price}</span>
+                    <span className="text-zinc-400">{order.side === "BUY" ? "▲" : "▼"} [oculto]</span>
                   </div>
                   <div className="text-zinc-600 mt-1">
                     {order.shards.length} shards | {order.isEncrypted ? "CIFRADO" : "ABERTO"}

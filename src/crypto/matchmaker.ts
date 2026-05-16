@@ -40,6 +40,7 @@ export interface MatchResult {
   matchId: string;
   buyOrderId: string;
   sellOrderId: string;
+  pair: string;            // par de trading (ex: "SOV/ETBRL")
   matchedAmount: number;
   matchedPrice: number;
   timestamp: number;
@@ -161,7 +162,8 @@ export function blindMatch(
       // Verifica compatibilidade de preço
       if (buy.price >= sell.price) {
         const matchedAmount = Math.min(buy.amount, sell.amount);
-        const matchedPrice = (buy.price + sell.price) / 2; // preço médio
+        // Taker executa ao preço do Maker (sell já estava no livro)
+        const matchedPrice = sell.price;
 
         // Gera prova ZK do matching
         const proofData = new TextEncoder().encode(
@@ -177,6 +179,7 @@ export function blindMatch(
           matchId: `match_${Date.now()}_${secureRandomInt(1000)}`,
           buyOrderId: buy.id,
           sellOrderId: sell.id,
+          pair,
           matchedAmount,
           matchedPrice,
           timestamp: Date.now(),

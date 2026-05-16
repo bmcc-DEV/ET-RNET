@@ -223,6 +223,24 @@ export class SovereignPools {
   }
 
   /**
+   * Ativa uma proposta para votação (pending → voting).
+   * Pode ser chamado pelo proposer ou após um período de review.
+   */
+  activateProposal(proposalId: string, activator: GhostIdentity): boolean {
+    const allProposals = Array.from(this.proposals.values()).flat();
+    const proposal = allProposals.find(p => p.id === proposalId);
+    if (!proposal || proposal.status !== "pending") return false;
+
+    // Apenas o proposer pode ativar (ou poderia ser automático via timer)
+    const activatorPk = Array.from(activator.publicKey).map(b => b.toString(16).padStart(2, "0")).join("");
+    if (proposal.proposerPk !== activatorPk) return false;
+
+    proposal.status = "voting";
+    console.log(`[SIP] Proposta ${proposalId} ativada para votação`);
+    return true;
+  }
+
+  /**
    * Vota em uma proposta usando voto ZK.
    */
   vote(

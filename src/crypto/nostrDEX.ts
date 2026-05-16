@@ -153,7 +153,9 @@ class NostrDEX {
         if (buy.makerPk === sell.makerPk) continue;
 
         const matchAmount = Math.min(buy.amount, sell.amount);
-        const matchPrice = (buy.price + sell.price) / 2;
+        // Taker executa ao preço do Maker (ordem que já estava no livro)
+        // Sell já estava no livro → Maker; Buy é o Taker que cruza
+        const matchPrice = sell.price;
 
         const hashLockBytes = sha3_256(
           new TextEncoder().encode(

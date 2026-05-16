@@ -31,12 +31,11 @@ export interface ChimeraOrder {
   id: string;
   side: "BUY" | "SELL";
   pair: string;
-  amount: number;
-  price: number;
   traderPk: string;
   timestamp: number;
   shards: OrderShard[];
   isEncrypted: boolean;
+  /** Price/amount NÃO são armazenados — só existem dentro dos shards criptografados. */
 }
 
 export interface ChimeraRound {
@@ -54,6 +53,7 @@ export interface LiquidityPool {
   pair: string;
   syntheticToken: string;    // $CHIM
   totalLiquidity: number;
+  totalSupply: number;       // Total de tokens $CHIM emitidos
   bidDepth: number;
   askDepth: number;
   spread: number;
@@ -97,6 +97,7 @@ export class ChimeraExchange {
         pair: pair.symbol,
         syntheticToken: `$CHIM_${pair.baseCurrency}`,
         totalLiquidity: 100000,
+        totalSupply: 100000, // 1:1 initial ratio
         bidDepth: 50000,
         askDepth: 50000,
         spread: 0.002,
@@ -135,30 +136,19 @@ export class ChimeraExchange {
     };
 
     // Executa matching cego para cada par
+    // O matcher (VRF-eleito) descriptografa shards localmente — ninguém mais vê price/amount
     for (const [pairSymbol, orders] of this.orderBook) {
       const buyOrders = orders.filter(o => o.side === "BUY");
       const sellOrders = orders.filter(o => o.side === "SELL");
 
-      // Converte para formato do matchmaker
-      const buyIntents: OrderIntent[] = buyOrders.map(o => ({
-        id: o.id,
-        side: "BUY",
-        pair: o.pair,
-        amount: o.amount,
-        price: o.price,
-        timestamp: o.timestamp,
-        traderPubKey: o.traderPk,
-      }));
+      // Matcher descriptografa shards para reconstruir OrderIntent (local only)
+      const buyIntents: OrderIntent[] = buyOrders
+        .map(o => this.decryptShards(o))
+        .filter((o): o is OrderIntent => o !== null);
 
-      const sellIntents: OrderIntent[] = sellOrders.map(o => ({
-        id: o.id,
-        side: "SELL",
-        pair: o.pair,
-        amount: o.amount,
-        price: o.price,
-        timestamp: o.timestamp,
-        traderPubKey: o.traderPk,
-      }));
+      const sellIntents: OrderIntent[] = sellOrders
+        .map(o => this.decryptShards(o))
+        .filter((o): o is OrderIntent => o !== null);
 
       const matches = blindMatch(buyIntents, sellIntents);
       round.matches.push(...matches);
@@ -198,6 +188,40 @@ export class ChimeraExchange {
       .join("");
   }
 
+  // ─── Shard Decryption (Matcher Only) ──────────────────────────────────────
+
+  /**
+   * Descriptografa shards para reconstruir OrderIntent.
+   * APENAS o matcher VRF-eleito executa isso — os shards permanecem criptografados no order book.
+   *
+   * Shards: 0 → 40% price + side, 1 → 30% price + pair, 2 → 30% price + amount
+   */
+  private decryptShards(order: ChimeraOrder): OrderIntent | null {
+    try {
+      const shardData = order.shards.map(s => JSON.parse(atob(s.encryptedData)) as Record<string, unknown>);
+
+      // Reconstrói preço a partir da shard 0 (40% do preço)
+      const part0 = shardData[0]?.pricePart as number;
+      const price = (part0 ?? 0) / 0.4;
+
+      const amount = shardData[2]?.amount as number ?? 0;
+
+      if (!price || !amount) return null;
+
+      return {
+        id: order.id,
+        side: order.side,
+        pair: order.pair,
+        amount,
+        price,
+        timestamp: order.timestamp,
+        traderPubKey: order.traderPk,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   // ─── Order Management ────────────────────────────────────────────────────
 
   /**
@@ -222,9 +246,13 @@ export class ChimeraExchange {
 
     const shards = fragmentOrder(orderIntent);
 
+    // NÃO expor price/amount — só shards criptografados
     const order: ChimeraOrder = {
-      ...orderIntent,
+      id: orderIntent.id,
+      side,
+      pair,
       traderPk: orderIntent.traderPubKey,
+      timestamp: orderIntent.timestamp,
       shards,
       isEncrypted: true,
     };
@@ -233,7 +261,7 @@ export class ChimeraExchange {
     orders.push(order);
     this.orderBook.set(pair, orders);
 
-    console.log(`[Chimera] Ordem ${side} ${amount} ${pair} @ $${price} submetida (fragmentada em ${shards.length} shards)`);
+    console.log(`[Chimera] Ordem ${side} ${pair} submetida (fragmentada em ${shards.length} shards, preço/qty ocultos)`);
     return order;
   }
 
@@ -241,7 +269,7 @@ export class ChimeraExchange {
 
   private updateLiquidityPools(round: ChimeraRound) {
     for (const match of round.matches) {
-      const pool = this.pools.get(match.matchId.split("_")[0] || "SOV/ETBRL");
+      const pool = this.pools.get(match.pair);
       if (pool) {
         pool.totalLiquidity += round.liquidityDelta;
         pool.lastUpdate = Date.now();
@@ -256,14 +284,19 @@ export class ChimeraExchange {
     const pool = this.pools.get(pair);
     if (!pool) throw new Error(`Par ${pair} não encontrado`);
 
+    // LP tokens proporcionais: (amount / totalLiquidity) * totalSupply
+    // Primeiro depósito: 1:1
+    const liquidityTokens = pool.totalLiquidity > 0
+      ? (amount / pool.totalLiquidity) * pool.totalSupply
+      : amount;
+
     pool.totalLiquidity += amount;
+    pool.totalSupply += liquidityTokens;
     pool.bidDepth += amount * 0.5;
     pool.askDepth += amount * 0.5;
     pool.lastUpdate = Date.now();
 
-    // Retorna tokens de liquidez sintéticos ($CHIM)
-    const liquidityTokens = amount * 0.001; // 0.1% fee
-    console.log(`[Chimera] +${amount} liquidez adicionada a ${pair}. Tokens $CHIM: ${liquidityTokens}`);
+    console.log(`[Chimera] +${amount} liquidez adicionada a ${pair}. Tokens $CHIM: ${liquidityTokens.toFixed(4)} (supply: ${pool.totalSupply.toFixed(4)})`);
     return liquidityTokens;
   }
 

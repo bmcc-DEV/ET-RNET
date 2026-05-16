@@ -1,133 +1,174 @@
 /**
- * VØID Payment Gateway — Mercado Pago Checkout Pro + Payment Request API
+ * VØID Payment Gateway — Bitcoin + Lightning Network
  *
- * Estratégia:
- * 1. Payment Request API (nativo do browser) → cartões internacionais
- * 2. Mercado Pago Checkout Pro → PIX, cartão, boleto (Brasil)
+ * Filosofia: sem intermediário, sem identidade, sem rastro.
  *
- * Fluxo Mercado Pago:
- * 1. Frontend chama backend /api/mercadopago/create
- * 2. Backend cria Preference via API Mercado Pago
- * 3. Retorna init_point (URL de pagamento)
- * 4. Usuário é redirecionado para página do Mercado Pago
- * 5. Paga (PIX, cartão, boleto)
- * 6. Volta pro app (success_url)
- * 7. Webhook confirma pagamento
+ * Fluxo:
+ * 1. Gera endereço Bitcoin único para a transação
+ * 2. Usuário paga do wallet dele
+ * 3. Monitora confirmação na blockchain
+ * 4. Sem KYC, sem conta, sem terceiro
+ *
+ * Opções de pagamento:
+ * - Bitcoin on-chain (3 confirmações ~30min)
+ * - Lightning Network (instantâneo, taxas mínimas)
+ * - Nostr Wallet Connect (NWC) — descentralizado via Nostr
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PaymentItem {
   label: string;
-  amount: string;
-  currency: string;
+  amount: string; // e.g. "49.90"
+  currency: string; // e.g. "BRL"
 }
 
 export interface PaymentResult {
   success: boolean;
-  method: "payment-request" | "mercadopago" | "mock";
-  transactionId?: string;
-  paymentUrl?: string;
+  method: "lightning" | "bitcoin" | "nwc" | "mock";
+  invoice?: string;
+  address?: string;
+  amountSat?: number;
+  paymentHash?: string;
   error?: string;
-  details?: Record<string, unknown>;
 }
 
-// ─── Payment Request API (Browser Native) ────────────────────────────────────
+export interface PaymentStatus {
+  status: "pending" | "confirmed" | "expired" | "error";
+  confirmations?: number;
+  txid?: string;
+}
 
-class PaymentRequestAPI {
-  static isAvailable(): boolean {
-    return typeof window !== "undefined" && "PaymentRequest" in window;
+// ─── Lightning Network (BOLT11) ──────────────────────────────────────────────
+
+class LightningPayment {
+  private bolt11: string;
+  private amountSat: number;
+  private paymentHash: string;
+  private createdAt: number;
+
+  constructor(amountSat: number, label: string) {
+    this.amountSat = amountSat;
+    this.bolt11 = this.generateBolt11(amountSat, label);
+    this.paymentHash = this.generateHash();
+    this.createdAt = Date.now();
   }
 
-  static async supportsCards(): Promise<boolean> {
-    if (!this.isAvailable()) return false;
-    try {
-      // @ts-ignore
-      const request = new PaymentRequest(
-        [{ supportedMethods: "basic-card" }],
-        { total: { label: "Test", amount: { currency: "USD", value: "1.00" } } }
-      );
-      return await request.canMakePayment();
-    } catch {
-      return false;
-    }
+  private generateBolt11(amount: number, label: string): string {
+    // BOLT11 invoice format (simplificado)
+    // Em produção, usar biblioteca lnbits ou lnd
+    const prefix = "lnbc";
+    const amountStr = amount.toString(16).padStart(4, "0");
+    const timestamp = Math.floor(Date.now() / 1000).toString(36);
+    const hash = this.generateHash().slice(0, 32);
+    return `${prefix}${amountStr}${timestamp}${hash}`;
   }
 
-  static async requestCardPayment(item: PaymentItem): Promise<PaymentResult> {
-    if (!this.isAvailable()) {
-      return { success: false, method: "payment-request", error: "Payment Request API não disponível" };
-    }
+  private generateHash(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
 
-    try {
-      // @ts-ignore
-      const request = new PaymentRequest(
-        [{
-          supportedMethods: "basic-card",
-          data: {
-            supportedNetworks: ["visa", "mastercard", "amex"],
-            supportedTypes: ["credit", "debit", "prepaid"],
-          },
-        }],
-        { total: { label: item.label, amount: { currency: item.currency, value: item.amount } } }
-      );
+  getInvoice(): string {
+    return this.bolt11;
+  }
 
-      const response = await request.show();
-      await response.complete("success");
+  getPaymentHash(): string {
+    return this.paymentHash;
+  }
 
-      return {
-        success: true,
-        method: "payment-request",
-        transactionId: `pr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      };
-    } catch (err: any) {
-      return { success: false, method: "payment-request", error: err.message };
-    }
+  getAmountSat(): number {
+    return this.amountSat;
+  }
+
+  isExpired(): boolean {
+    return Date.now() - this.createdAt > 3600000; // 1 hora
   }
 }
 
-// ─── Mercado Pago Checkout Pro ───────────────────────────────────────────────
+// ─── Bitcoin On-Chain ────────────────────────────────────────────────────────
 
-class MercadoPagoCheckout {
-  /**
-   * Cria preferência de pagamento via backend e redireciona.
-   */
-  async createAndRedirect(
-    item: PaymentItem,
-    successUrl: string,
-    cancelUrl: string
-  ): Promise<PaymentResult> {
+class BitcoinPayment {
+  private address: string;
+  private amountSat: number;
+  private txid: string | null = null;
+  private confirmations: number = 0;
+
+  constructor(amountSat: number) {
+    this.amountSat = amountSat;
+    this.address = this.generateAddress();
+  }
+
+  private generateAddress(): string {
+    // Gerar endereço Bitcoin (bech32/segwit)
+    // Em produção, usar bitcoinjs-lib ou ecpair
+    const chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let addr = "bc1q";
+    for (let i = 0; i < 38; i++) {
+      addr += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return addr;
+  }
+
+  getAddress(): string {
+    return this.address;
+  }
+
+  getAmountSat(): number {
+    return this.amountSat;
+  }
+
+  getAmountBTC(): string {
+    return (this.amountSat / 100000000).toFixed(8);
+  }
+
+  // Verificar pagamento via API pública (blockstream, mempool.space)
+  async checkPayment(): Promise<PaymentStatus> {
     try {
-      const response = await fetch("/api/mercadopago/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: item.label,
-          price: parseFloat(item.amount),
-          currency: item.currency,
-          success_url: successUrl,
-          cancel_url: cancelUrl,
-        }),
-      });
+      // Usar mempool.space API (gratuita, sem KYC)
+      const res = await fetch(`https://mempool.space/api/address/${this.address}`);
+      if (!res.ok) return { status: "pending" };
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || `HTTP ${response.status}`);
+      const data = await res.json();
+      if (data.chain_stats.funded_txo_sum > 0) {
+        this.confirmations = data.chain_stats.block_height || 0;
+        return {
+          status: this.confirmations >= 3 ? "confirmed" : "pending",
+          confirmations: this.confirmations,
+        };
       }
-
-      const { init_point, id } = await response.json();
-
-      // Redirecionar para página de pagamento do Mercado Pago
-      window.location.href = init_point;
-
-      return {
-        success: true,
-        method: "mercadopago",
-        transactionId: id,
-        paymentUrl: init_point,
-      };
-    } catch (err: any) {
-      return { success: false, method: "mercadopago", error: err.message };
+      return { status: "pending" };
+    } catch {
+      return { status: "pending" };
     }
+  }
+}
+
+// ─── Nostr Wallet Connect (NWC) ──────────────────────────────────────────────
+
+class NWCPayment {
+  private walletPubkey: string;
+  private amountSat: number;
+
+  constructor(walletPubkey: string, amountSat: number) {
+    this.walletPubkey = walletPubkey;
+    this.amountSat = amountSat;
+  }
+
+  /**
+   * Cria LNURL invoice via NWC.
+   * Requer wallet pubkey do destinatário.
+   */
+  async createInvoice(): Promise<{ invoice: string; paymentHash: string }> {
+    // Em produção, usar Nostr relays para criar invoice
+    // Por agora, gerar invoice simulado
+    const paymentHash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, "0")).join("");
+
+    return {
+      invoice: `lnbc${this.amountSat.toString(16)}${Date.now().toString(36)}${paymentHash.slice(0, 32)}`,
+      paymentHash,
+    };
   }
 }
 
@@ -135,7 +176,6 @@ class MercadoPagoCheckout {
 
 export class PaymentGateway {
   private static instance: PaymentGateway;
-  private mp = new MercadoPagoCheckout();
 
   static getInstance(): PaymentGateway {
     if (!PaymentGateway.instance) {
@@ -144,33 +184,92 @@ export class PaymentGateway {
     return PaymentGateway.instance;
   }
 
-  async getCapabilities(): Promise<{
-    paymentRequest: boolean;
-    mercadopago: boolean;
-  }> {
-    return {
-      paymentRequest: await PaymentRequestAPI.supportsCards(),
-      mercadopago: true, // sempre disponível via backend
+  /**
+   * Converte moeda fiat para satoshis.
+   * Em produção, usar API de preço real (CoinGecko, CoinMarketCap).
+   */
+  async fiatToSat(amount: string, currency: string): Promise<number> {
+    // Preço simulado — em produção, buscar de API
+    const btcPrices: Record<string, number> = {
+      BRL: 350000, // R$350k por BTC
+      USD: 65000,
+      EUR: 60000,
     };
+    const price = btcPrices[currency] || btcPrices.USD;
+    const btcAmount = parseFloat(amount) / price;
+    return Math.round(btcAmount * 100000000);
   }
 
   /**
-   * Processa pagamento.
-   * Tenta Payment Request API primeiro, depois Mercado Pago.
+   * Cria pagamento Lightning (instantâneo).
+   */
+  async createLightningPayment(item: PaymentItem): Promise<PaymentResult> {
+    try {
+      const amountSat = await this.fiatToSat(item.amount, item.currency);
+      const payment = new LightningPayment(amountSat, item.label);
+
+      return {
+        success: true,
+        method: "lightning",
+        invoice: payment.getInvoice(),
+        amountSat: payment.getAmountSat(),
+        paymentHash: payment.getPaymentHash(),
+      };
+    } catch (err: any) {
+      return { success: false, method: "lightning", error: err.message };
+    }
+  }
+
+  /**
+   * Cria pagamento Bitcoin on-chain (~30min).
+   */
+  async createBitcoinPayment(item: PaymentItem): Promise<PaymentResult> {
+    try {
+      const amountSat = await this.fiatToSat(item.amount, item.currency);
+      const payment = new BitcoinPayment(amountSat);
+
+      return {
+        success: true,
+        method: "bitcoin",
+        address: payment.getAddress(),
+        amountSat: payment.getAmountSat(),
+      };
+    } catch (err: any) {
+      return { success: false, method: "bitcoin", error: err.message };
+    }
+  }
+
+  /**
+   * Cria pagamento via Nostr Wallet Connect.
+   */
+  async createNWCPayment(walletPubkey: string, item: PaymentItem): Promise<PaymentResult> {
+    try {
+      const amountSat = await this.fiatToSat(item.amount, item.currency);
+      const payment = new NWCPayment(walletPubkey, amountSat);
+      const { invoice, paymentHash } = await payment.createInvoice();
+
+      return {
+        success: true,
+        method: "nwc",
+        invoice,
+        amountSat,
+        paymentHash,
+      };
+    } catch (err: any) {
+      return { success: false, method: "nwc", error: err.message };
+    }
+  }
+
+  /**
+   * Processa pagamento — Lightning primeiro (instantâneo), depois Bitcoin.
    */
   async pay(item: PaymentItem): Promise<PaymentResult> {
-    // 1. Tentar Payment Request API (internacional)
-    if (await PaymentRequestAPI.supportsCards()) {
-      const result = await PaymentRequestAPI.requestCardPayment(item);
-      if (result.success) return result;
-    }
+    // 1. Lightning (instantâneo, baixas taxas)
+    const lightning = await this.createLightningPayment(item);
+    if (lightning.success) return lightning;
 
-    // 2. Fallback: Mercado Pago Checkout Pro (Brasil)
-    return this.mp.createAndRedirect(
-      item,
-      `${window.location.origin}/payment/success`,
-      `${window.location.origin}/payment/cancel`
-    );
+    // 2. Bitcoin on-chain (fallback)
+    return this.createBitcoinPayment(item);
   }
 }
 

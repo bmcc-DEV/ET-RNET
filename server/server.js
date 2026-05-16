@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import crypto from "crypto";
 import { join } from "path";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -9,102 +10,150 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
-const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN || "";
 
-console.log(`[Mercado Pago] Token: ${MP_ACCESS_TOKEN ? "CONFIGURADO" : "NÃO CONFIGURADO"}`);
+// ─── Lightning Invoice Store (in-memory) ─────────────────────────────────────
+
+const invoices = new Map();
 
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    mercadopago: !!MP_ACCESS_TOKEN,
+    network: "bitcoin-lightning",
+    invoices: invoices.size,
     timestamp: Date.now(),
   });
 });
 
-// ─── Mercado Pago Checkout Pro ───────────────────────────────────────────────
+// ─── Create Lightning Invoice ────────────────────────────────────────────────
 
-app.post("/api/mercadopago/create", async (req, res) => {
+app.post("/api/lightning/create", async (req, res) => {
   try {
-    const { title, price, currency, success_url, cancel_url } = req.body;
+    const { amount, currency, label } = req.body;
 
-    if (!MP_ACCESS_TOKEN) {
-      return res.json({
-        id: `mp_mock_${Date.now()}`,
-        init_point: success_url || "https://www.mercadopago.com.br",
-        status: "mock",
-      });
-    }
+    // Converter fiat para satoshis
+    const btcPrices = { BRL: 350000, USD: 65000, EUR: 60000 };
+    const price = btcPrices[currency] || btcPrices.USD;
+    const btcAmount = parseFloat(amount) / price;
+    const amountSat = Math.round(btcAmount * 100000000);
 
-    // Criar Preference via API Mercado Pago
-    const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${MP_ACCESS_TOKEN}`,
-      },
-      body: JSON.stringify({
-        items: [{
-          title: title || "ETΞRNET Purchase",
-          quantity: 1,
-          unit_price: price,
-          currency_id: currency || "BRL",
-        }],
-        back_urls: {
-          success: success_url || `${req.headers.origin}/payment/success`,
-          failure: cancel_url || `${req.headers.origin}/payment/cancel`,
-          pending: success_url || `${req.headers.origin}/payment/pending`,
-        },
-        auto_return: "approved",
-        payment_methods: {
-          excluded_payment_types: [],
-          installments: 12,
-        },
-        notification_url: `${req.headers.origin}/api/mercadopago/webhook`,
-      }),
-    });
+    // Gerar invoice BOLT11 simulado
+    const paymentHash = crypto.randomBytes(32).toString("hex");
+    const timestamp = Math.floor(Date.now() / 1000).toString(36);
+    const invoice = `lnbc${amountSat.toString(16)}${timestamp}${paymentHash.slice(0, 32)}`;
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.message || `HTTP ${response.status}`);
-    }
+    // Armazenar
+    const invoiceData = {
+      id: crypto.randomUUID(),
+      invoice,
+      paymentHash,
+      amountSat,
+      amount,
+      currency,
+      label: label || "ETΞRNET Purchase",
+      status: "pending",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 3600000, // 1 hora
+    };
 
-    const preference = await response.json();
+    invoices.set(invoiceData.id, invoiceData);
 
     res.json({
-      id: preference.id,
-      init_point: preference.init_point,
-      sandbox_init_point: preference.sandbox_init_point,
+      id: invoiceData.id,
+      invoice: invoiceData.invoice,
+      amountSat: invoiceData.amountSat,
+      paymentHash: invoiceData.paymentHash,
+      expiresAt: invoiceData.expiresAt,
     });
   } catch (err) {
-    console.error("[Mercado Pago] Erro:", err.message);
+    console.error("[Lightning] Erro:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Mercado Pago Webhook ────────────────────────────────────────────────────
+// ─── Check Invoice Status ────────────────────────────────────────────────────
 
-app.post("/api/mercadopago/webhook", async (req, res) => {
+app.get("/api/lightning/status/:id", (req, res) => {
+  const invoice = invoices.get(req.params.id);
+  if (!invoice) {
+    return res.status(404).json({ error: "Invoice não encontrada" });
+  }
+
+  // Verificar expiração
+  if (Date.now() > invoice.expiresAt) {
+    invoice.status = "expired";
+  }
+
+  res.json({
+    id: invoice.id,
+    status: invoice.status,
+    amountSat: invoice.amountSat,
+    confirmations: invoice.status === "confirmed" ? 6 : 0,
+  });
+});
+
+// ─── Webhook (para LNbits, LND, etc) ────────────────────────────────────────
+
+app.post("/api/lightning/webhook", (req, res) => {
   try {
-    const { type, data } = req.body;
+    const { paymentHash, status } = req.body;
 
-    if (type === "payment") {
-      const paymentId = data?.id;
-      if (paymentId && MP_ACCESS_TOKEN) {
-        const response = await fetch(
-          `https://api.mercadopago.com/v1/payments/${paymentId}`,
-          { headers: { "Authorization": `Bearer ${MP_ACCESS_TOKEN}` } }
-        );
-        const payment = await response.json();
-        console.log(`[Mercado Pago] Pagamento ${payment.status}: ${paymentId}`);
+    // Encontrar invoice pelo paymentHash
+    for (const [id, invoice] of invoices) {
+      if (invoice.paymentHash === paymentHash) {
+        invoice.status = status || "confirmed";
+        console.log(`[Lightning] Pagamento ${invoice.status}: ${id}`);
+        break;
       }
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("[Mercado Pago] Webhook error:", err.message);
+    console.error("[Lightning] Webhook error:", err.message);
     res.sendStatus(200);
+  }
+});
+
+// ─── Create Bitcoin Address ──────────────────────────────────────────────────
+
+app.post("/api/bitcoin/create", (req, res) => {
+  try {
+    const { amount, currency } = req.body;
+
+    const btcPrices = { BRL: 350000, USD: 65000, EUR: 60000 };
+    const price = btcPrices[currency] || btcPrices.USD;
+    const btcAmount = parseFloat(amount) / price;
+    const amountSat = Math.round(btcAmount * 100000000);
+
+    // Gerar endereço bech32 simulado
+    const chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let address = "bc1q";
+    for (let i = 0; i < 38; i++) {
+      address += chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    const addressData = {
+      id: crypto.randomUUID(),
+      address,
+      amountSat,
+      amount,
+      currency,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+
+    invoices.set(addressData.id, addressData);
+
+    res.json({
+      id: addressData.id,
+      address: addressData.address,
+      amountSat: addressData.amountSat,
+      amountBTC: (amountSat / 100000000).toFixed(8),
+    });
+  } catch (err) {
+    console.error("[Bitcoin] Erro:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -120,6 +169,7 @@ app.get("*", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n🌐 ET-RNET Server rodando em http://localhost:${PORT}`);
-  console.log(`   Mercado Pago: ${MP_ACCESS_TOKEN ? "ATIVO" : "MOCK"}`);
+  console.log(`   Network: Bitcoin + Lightning`);
+  console.log(`   Sem intermediário, sem KYC, sem rastro`);
   console.log(`   Health: http://localhost:${PORT}/health\n`);
 });

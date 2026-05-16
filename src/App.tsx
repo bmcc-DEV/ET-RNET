@@ -39,6 +39,7 @@ const HGPUVisualizer = lazy(() => import("./components/HGPUVisualizer"));
 const PaleoPanel = lazy(() => import("./components/PaleoPanel"));
 const SocialFabricPanel = lazy(() => import("./components/SocialFabricPanel"));
 const CryptoTestamentLab = lazy(() => import("./components/CryptoTestamentLab"));
+const MiningPanel = lazy(() => import("./components/MiningPanel"));
 const Glossary = lazy(() => import("./components/Glossary"));
 
 function LoadingFallback() {
@@ -139,6 +140,7 @@ export default function App() {
           <Hydra />
           <Omega />
           <HGPUVisualizer />
+          <MiningPanel />
           <PaleoPanel />
 
           {/* === SOCIAL & PALEO === */}

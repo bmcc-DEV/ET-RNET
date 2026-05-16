@@ -92,7 +92,7 @@ export function satisfiesDifficulty(hash: string, difficulty: number): boolean {
 
 /**
  * Minera um PoW para um shard QEL.
- * Tenta GPU primeiro (WebGPU), fallback CPU.
+ * Tenta HGPU (processamento geométrico) → GPU WebGPU → CPU SHA3.
  */
 export async function minePoW(
   ghostId: string,
@@ -100,16 +100,29 @@ export async function minePoW(
   difficulty: number,
   maxIterations = 10_000_000,
 ): Promise<PoWProof> {
-  const { gpuMiner } = await import("./gpuMiner");
+  // 1. Tentar HGPU PoW (processamento geométrico real)
+  const { hgpuPoW } = await import("./hgpuCompute");
+  const hgpuResult = hgpuPoW(difficulty, Math.min(maxIterations, 100000));
 
-  // Tentar GPU primeiro
+  if (hgpuResult.found) {
+    return {
+      nonce: hgpuResult.nonce,
+      hash: hgpuResult.hash,
+      difficulty,
+      timestamp: Date.now(),
+      iterations: hgpuResult.iterations,
+      elapsedMs: hgpuResult.elapsedMs,
+    };
+  }
+
+  // 2. Tentar GPU WebGPU
+  const { gpuMiner } = await import("./gpuMiner");
   const gpuResult = await gpuMiner.mine({
     challenge: shardCommitment,
     difficulty,
     prefix: `${ghostId}|${shardCommitment}|`,
   }, maxIterations);
 
-  // Verificar se GPU encontrou hash válido com SHA3 real
   if (gpuResult.found) {
     const base = `${ghostId}|${shardCommitment}|`;
     const data = base + gpuResult.nonce;
@@ -129,7 +142,7 @@ export async function minePoW(
     }
   }
 
-  // Fallback CPU (SHA3 real)
+  // 3. Fallback CPU SHA3
   const start = performance.now();
   const base = `${ghostId}|${shardCommitment}|`;
   let nonce = 0;
@@ -146,15 +159,13 @@ export async function minePoW(
     }
   }
 
-  const elapsed = performance.now() - start;
-
   return {
     nonce,
     hash,
     difficulty,
     timestamp: Date.now(),
     iterations: nonce + 1,
-    elapsedMs: elapsed,
+    elapsedMs: performance.now() - start,
   };
 }
 

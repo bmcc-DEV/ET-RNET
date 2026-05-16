@@ -109,15 +109,24 @@ export async function minePoW(
     prefix: `${ghostId}|${shardCommitment}|`,
   }, maxIterations);
 
+  // Verificar se GPU encontrou hash válido com SHA3 real
   if (gpuResult.found) {
-    return {
-      nonce: gpuResult.nonce,
-      hash: gpuResult.hash,
-      difficulty,
-      timestamp: Date.now(),
-      iterations: gpuResult.iterations,
-      elapsedMs: gpuResult.elapsedMs,
-    };
+    const base = `${ghostId}|${shardCommitment}|`;
+    const data = base + gpuResult.nonce;
+    const realHash = Array.from(sha3_256(new TextEncoder().encode(data)) as Uint8Array)
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    if (satisfiesDifficulty(realHash, difficulty)) {
+      return {
+        nonce: gpuResult.nonce,
+        hash: realHash,
+        difficulty,
+        timestamp: Date.now(),
+        iterations: gpuResult.iterations,
+        elapsedMs: gpuResult.elapsedMs,
+      };
+    }
   }
 
   // Fallback CPU (SHA3 real)

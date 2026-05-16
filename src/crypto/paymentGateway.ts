@@ -1,38 +1,35 @@
 /**
- * VØID Payment Gateway — Stripe + Payment Request API
+ * VØID Payment Gateway — Mercado Pago Checkout Pro + Payment Request API
  *
  * Estratégia:
- * 1. Payment Request API (nativo do browser) → cartões + PIX internacional
- * 2. Fallback: Stripe Checkout (server-side redirect)
+ * 1. Payment Request API (nativo do browser) → cartões internacionais
+ * 2. Mercado Pago Checkout Pro → PIX, cartão, boleto (Brasil)
  *
- * Payment Request API suporta:
- * - Cartões de crédito/débito (globais)
- * - Google Pay / Apple Pay (quando disponível)
- * - PIX (via Stripe ou PSP brasileiro)
- *
- * Se Payment Request API funcionar internacionalmente,
- * Stripe pode ser removido completamente.
+ * Fluxo Mercado Pago:
+ * 1. Frontend chama backend /api/mercadopago/create
+ * 2. Backend cria Preference via API Mercado Pago
+ * 3. Retorna init_point (URL de pagamento)
+ * 4. Usuário é redirecionado para página do Mercado Pago
+ * 5. Paga (PIX, cartão, boleto)
+ * 6. Volta pro app (success_url)
+ * 7. Webhook confirma pagamento
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PaymentItem {
   label: string;
-  amount: string; // e.g. "49.90"
-  currency: string; // e.g. "BRL"
+  amount: string;
+  currency: string;
 }
 
 export interface PaymentResult {
   success: boolean;
-  method: "payment-request" | "stripe" | "mock";
+  method: "payment-request" | "mercadopago" | "mock";
   transactionId?: string;
+  paymentUrl?: string;
   error?: string;
   details?: Record<string, unknown>;
-}
-
-export interface StripeConfig {
-  publishableKey: string;
-  apiVersion?: string;
 }
 
 // ─── Payment Request API (Browser Native) ────────────────────────────────────
@@ -42,44 +39,21 @@ class PaymentRequestAPI {
     return typeof window !== "undefined" && "PaymentRequest" in window;
   }
 
-  /**
-   * Verifica se Payment Request API suporta um método de pagamento.
-   */
-  static async canMakePayment(method: string): Promise<boolean> {
+  static async supportsCards(): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      // @ts-ignore — PaymentRequest é experimental
+      // @ts-ignore
       const request = new PaymentRequest(
-        [{ supportedMethods: method }],
+        [{ supportedMethods: "basic-card" }],
         { total: { label: "Test", amount: { currency: "USD", value: "1.00" } } }
       );
-      const result = await request.canMakePayment();
-      return result;
+      return await request.canMakePayment();
     } catch {
       return false;
     }
   }
 
-  /**
-   * Verifica suporte a cartões (internacional).
-   */
-  static async supportsCards(): Promise<boolean> {
-    return this.canMakePayment("basic-card");
-  }
-
-  /**
-   * Verifica suporte a Google Pay.
-   */
-  static async supportsGooglePay(): Promise<boolean> {
-    return this.canMakePayment("https://google.com/payments");
-  }
-
-  /**
-   * Cria e exibe Payment Request para cartão.
-   */
-  static async requestCardPayment(
-    item: PaymentItem
-  ): Promise<PaymentResult> {
+  static async requestCardPayment(item: PaymentItem): Promise<PaymentResult> {
     if (!this.isAvailable()) {
       return { success: false, method: "payment-request", error: "Payment Request API não disponível" };
     }
@@ -87,84 +61,23 @@ class PaymentRequestAPI {
     try {
       // @ts-ignore
       const request = new PaymentRequest(
-        [
-          {
-            supportedMethods: "basic-card",
-            data: {
-              supportedNetworks: ["visa", "mastercard", "amex", "discover"],
-              supportedTypes: ["credit", "debit", "prepaid"],
-            },
+        [{
+          supportedMethods: "basic-card",
+          data: {
+            supportedNetworks: ["visa", "mastercard", "amex"],
+            supportedTypes: ["credit", "debit", "prepaid"],
           },
-        ],
-        {
-          total: {
-            label: item.label,
-            amount: { currency: item.currency, value: item.amount },
-          },
-        }
+        }],
+        { total: { label: item.label, amount: { currency: item.currency, value: item.amount } } }
       );
 
       const response = await request.show();
-      // Aqui processaríamos o pagamento via backend
-      // Por agora, simulamos sucesso
       await response.complete("success");
 
       return {
         success: true,
         method: "payment-request",
         transactionId: `pr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        details: { method: "basic-card", currency: item.currency },
-      };
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        return { success: false, method: "payment-request", error: "Pagamento cancelado pelo usuário" };
-      }
-      return { success: false, method: "payment-request", error: err.message };
-    }
-  }
-
-  /**
-   * Cria e exibe Payment Request para Google Pay.
-   */
-  static async requestGooglePayPayment(
-    item: PaymentItem
-  ): Promise<PaymentResult> {
-    if (!this.isAvailable()) {
-      return { success: false, method: "payment-request", error: "Payment Request API não disponível" };
-    }
-
-    try {
-      // @ts-ignore
-      const request = new PaymentRequest(
-        [
-          {
-            supportedMethods: "https://google.com/payments",
-            data: {
-              environment: "TEST",
-              merchantId: "VOOID_MERCHANT_ID",
-              paymentMethodTokenizationParameters: {
-                tokenizationType: "PAYMENT_GATEWAY",
-                parameters: { gateway: "stripe", "stripe:version": "2024-01", "stripe:publishableKey": "pk_test_..." },
-              },
-            },
-          },
-        ],
-        {
-          total: {
-            label: item.label,
-            amount: { currency: item.currency, value: item.amount },
-          },
-        }
-      );
-
-      const response = await request.show();
-      await response.complete("success");
-
-      return {
-        success: true,
-        method: "payment-request",
-        transactionId: `gpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        details: { method: "google-pay", currency: item.currency },
       };
     } catch (err: any) {
       return { success: false, method: "payment-request", error: err.message };
@@ -172,89 +85,49 @@ class PaymentRequestAPI {
   }
 }
 
-// ─── Stripe Checkout (Fallback) ──────────────────────────────────────────────
+// ─── Mercado Pago Checkout Pro ───────────────────────────────────────────────
 
-class StripeCheckout {
-  private config: StripeConfig | null = null;
-
+class MercadoPagoCheckout {
   /**
-   * Configura Stripe com a publishable key.
+   * Cria preferência de pagamento via backend e redireciona.
    */
-  configure(publishableKey: string) {
-    this.config = { publishableKey, apiVersion: "2024-01" };
-  }
-
-  /**
-   * Cria sessão de checkout via Stripe API.
-   * Requer backend proxy para proteger a secret key.
-   */
-  async createCheckoutSession(
-    items: PaymentItem[],
+  async createAndRedirect(
+    item: PaymentItem,
     successUrl: string,
     cancelUrl: string
   ): Promise<PaymentResult> {
-    if (!this.config) {
-      return { success: false, method: "stripe", error: "Stripe não configurado" };
-    }
-
     try {
-      // Em produção, isso chamaria um backend proxy
-      // POST /api/stripe/checkout
-      const response = await fetch("/api/stripe/checkout", {
+      const response = await fetch("/api/mercadopago/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map((item) => ({
-            price_data: {
-              currency: item.currency.toLowerCase(),
-              product_data: { name: item.label },
-              unit_amount: Math.round(parseFloat(item.amount) * 100),
-            },
-            quantity: 1,
-          })),
+          title: item.label,
+          price: parseFloat(item.amount),
+          currency: item.currency,
           success_url: successUrl,
           cancel_url: cancelUrl,
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const err = await response.json();
+        throw new Error(err.error || `HTTP ${response.status}`);
       }
 
-      const { sessionId } = await response.json();
+      const { init_point, id } = await response.json();
 
-      // Redirecionar para Stripe Checkout
-      // @ts-ignore — Stripe.js load
-      const stripe = await this.loadStripe();
-      if (stripe) {
-        await stripe.redirectToCheckout({ sessionId });
-      }
+      // Redirecionar para página de pagamento do Mercado Pago
+      window.location.href = init_point;
 
       return {
         success: true,
-        method: "stripe",
-        transactionId: sessionId,
+        method: "mercadopago",
+        transactionId: id,
+        paymentUrl: init_point,
       };
     } catch (err: any) {
-      return { success: false, method: "stripe", error: err.message };
+      return { success: false, method: "mercadopago", error: err.message };
     }
-  }
-
-  private async loadStripe(): Promise<any> {
-    if (typeof window === "undefined") return null;
-    // @ts-ignore
-    if (window.Stripe) return window.Stripe(this.config?.publishableKey);
-
-    return new Promise((resolve) => {
-      const script = document.createElement("script");
-      script.src = "https://js.stripe.com/v3/";
-      script.onload = () => {
-        // @ts-ignore
-        resolve(window.Stripe(this.config?.publishableKey));
-      };
-      script.onerror = () => resolve(null);
-      document.head.appendChild(script);
-    });
   }
 }
 
@@ -262,8 +135,7 @@ class StripeCheckout {
 
 export class PaymentGateway {
   private static instance: PaymentGateway;
-  private stripe = new StripeCheckout();
-  private stripeConfigured = false;
+  private mp = new MercadoPagoCheckout();
 
   static getInstance(): PaymentGateway {
     if (!PaymentGateway.instance) {
@@ -272,63 +144,34 @@ export class PaymentGateway {
     return PaymentGateway.instance;
   }
 
-  /**
-   * Configura Stripe (opcional — só necessário se Payment Request API não suportar).
-   */
-  configureStripe(publishableKey: string) {
-    this.stripe.configure(publishableKey);
-    this.stripeConfigured = true;
-  }
-
-  /**
-   * Verifica capacidades de pagamento do browser.
-   */
   async getCapabilities(): Promise<{
     paymentRequest: boolean;
-    cards: boolean;
-    googlePay: boolean;
-    stripe: boolean;
+    mercadopago: boolean;
   }> {
     return {
-      paymentRequest: PaymentRequestAPI.isAvailable() || false,
-      cards: await PaymentRequestAPI.supportsCards(),
-      googlePay: await PaymentRequestAPI.supportsGooglePay(),
-      stripe: this.stripeConfigured,
+      paymentRequest: await PaymentRequestAPI.supportsCards(),
+      mercadopago: true, // sempre disponível via backend
     };
   }
 
   /**
-   * Processa pagamento — tenta Payment Request API primeiro, depois Stripe.
+   * Processa pagamento.
+   * Tenta Payment Request API primeiro, depois Mercado Pago.
    */
   async pay(item: PaymentItem): Promise<PaymentResult> {
-    // 1. Tentar Payment Request API (nativo, sem dependências)
-    const caps = await this.getCapabilities();
-    if (caps.googlePay) {
-      const result = await PaymentRequestAPI.requestGooglePayPayment(item);
-      if (result.success) return result;
-    }
-    if (caps.cards) {
+    // 1. Tentar Payment Request API (internacional)
+    if (await PaymentRequestAPI.supportsCards()) {
       const result = await PaymentRequestAPI.requestCardPayment(item);
       if (result.success) return result;
     }
 
-    // 2. Fallback: Stripe Checkout
-    if (caps.stripe) {
-      return this.stripe.createCheckoutSession(
-        [item],
-        `${window.location.origin}/payment/success`,
-        `${window.location.origin}/payment/cancel`
-      );
-    }
-
-    // 3. Nenhum método disponível
-    return {
-      success: false,
-      method: "mock",
-      error: "Nenhum método de pagamento disponível neste browser",
-    };
+    // 2. Fallback: Mercado Pago Checkout Pro (Brasil)
+    return this.mp.createAndRedirect(
+      item,
+      `${window.location.origin}/payment/success`,
+      `${window.location.origin}/payment/cancel`
+    );
   }
 }
 
-// Singleton
 export const paymentGateway = PaymentGateway.getInstance();

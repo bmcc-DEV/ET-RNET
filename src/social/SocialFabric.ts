@@ -8,6 +8,7 @@
  */
 
 import { voidOrchestrator } from "../core/VoidOrchestrator";
+import { secureRandomId } from "../utils/secureRandom";
 import { GhostIdentity } from "../crypto/ghostid";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { sha3_256 } from "@noble/hashes/sha3.js";
@@ -59,7 +60,7 @@ export class SocialFabric {
    */
   public async broadcastPublicPost(content: string, identity: GhostIdentity) {
     const post: SocialMessage = {
-      id: `post_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      id: `post_${Date.now()}_${secureRandomId(4)}`,
       senderPubKey: Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join(''),
       content,
       timestamp: Date.now()
@@ -100,7 +101,7 @@ export class SocialFabric {
     encryptedPayload.set(ciphertextAndTag, nonce.length);
 
     const msg: SocialMessage = {
-      id: `dm_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      id: `dm_${Date.now()}_${secureRandomId(4)}`,
       senderPubKey: senderPkHex,
       recipientPubKey: recipientPk,
       content: btoa(String.fromCharCode(...encryptedPayload)),

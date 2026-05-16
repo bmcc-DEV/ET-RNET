@@ -10,6 +10,7 @@
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
+import { secureRandomInt } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -173,7 +174,7 @@ export function blindMatch(
           .slice(0, 32);
 
         matches.push({
-          matchId: `match_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          matchId: `match_${Date.now()}_${secureRandomInt(1000)}`,
           buyOrderId: buy.id,
           sellOrderId: sell.id,
           matchedAmount,

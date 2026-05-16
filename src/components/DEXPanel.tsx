@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
 import { FragmentedOrderBook, type OrderIntent, type MatchResult, type OrderSide } from "../crypto/matchmaker";
+import { secureRandomId } from "../utils/secureRandom";
 
 const orderBook = new FragmentedOrderBook();
 
@@ -28,7 +29,7 @@ export default function DEXPanel() {
     if (!identity || !amount || !price) return;
 
     const order: OrderIntent = {
-      id: `order_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      id: `order_${Date.now()}_${secureRandomId(4)}`,
       side,
       pair,
       amount: parseFloat(amount),

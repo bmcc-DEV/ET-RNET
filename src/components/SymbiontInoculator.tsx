@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
 import { sovTokenomics } from "../crypto/sovTokenomics";
+import { secureRandomInt } from "../utils/secureRandom";
 
 export default function SymbiontInoculator() {
   const { identity } = useVoid();
@@ -15,10 +16,10 @@ export default function SymbiontInoculator() {
     if (!isInoculated || !identity) return;
 
     const interval = setInterval(() => {
-      const reward = sovTokenomics.mintRoutingReward(identity, Math.floor(Math.random() * 5));
+      const reward = sovTokenomics.mintRoutingReward(identity, secureRandomInt(5));
       setSovMined(prev => prev + reward.amount);
-      setShardCount(prev => prev + Math.floor(Math.random() * 3));
-      setStorageUsed(prev => Math.min(prev + Math.floor(Math.random() * 100), 51200));
+      setShardCount(prev => prev + secureRandomInt(3));
+      setStorageUsed(prev => Math.min(prev + secureRandomInt(100), 51200));
     }, 10000);
 
     return () => clearInterval(interval);

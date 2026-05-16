@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { secureRandom } from "../utils/secureRandom";
 
 /**
  * ETΞRNET — HGPU (Homotopic Geometric Processing Unit)
@@ -95,7 +96,7 @@ export default function HGPUVisualizer() {
     for (let i = 0; i < 4; i++) {
       const coeffs = new Float32Array(64);
       for (let j = 0; j < 64; j++) {
-        coeffs[j] = (Math.random() - 0.5) * Math.exp(-j / 10);
+        coeffs[j] = (secureRandom() - 0.5) * Math.exp(-j / 10);
       }
       homotopyCache.current.set(i, coeffs);
     }

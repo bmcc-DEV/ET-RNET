@@ -14,6 +14,7 @@
  */
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
+import { secureRandomInt } from "../utils/secureRandom";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { createPedersenCommitment } from "./utxo";
 import { signWithNodeKey } from "./signingKeys";
@@ -110,7 +111,7 @@ const wasmKarmaCore = {
     const totalAmount = tokens.reduce((sum, t) => sum + t.amount, 0);
     const newBlinding = randomBytes(32);
     const newCommitment = this.generateCommitment(totalAmount, newBlinding);
-    const newId = `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const newId = `bkt_${Date.now()}_${secureRandomInt(10000)}`;
     
     return {
       id: newId,
@@ -135,7 +136,7 @@ const wasmKarmaCore = {
 
     return amounts.map(amount => {
       const blinding = randomBytes(32);
-      const splitId = `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const splitId = `bkt_${Date.now()}_${secureRandomInt(10000)}`;
       return {
         id: splitId,
         amount,
@@ -173,7 +174,7 @@ export class KarmaSystem {
    */
   mintKarmaToken(amount: number, hcnSignature: Uint8Array): BlindKarmaToken {
     const blindingFactor = randomBytes(32);
-    const id = `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const id = `bkt_${Date.now()}_${secureRandomInt(10000)}`;
     
     const token: BlindKarmaToken = {
       id,
@@ -324,7 +325,7 @@ export class KarmaSystem {
       const newBlinding = randomBytes(32);
       const newToken: BlindKarmaToken = {
         ...token,
-        id: `bkt_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+        id: `bkt_${Date.now()}_${secureRandomInt(10000)}`,
         blindingFactor: newBlinding,
         commitment: wasmKarmaCore.generateCommitment(token.amount, newBlinding),
         nullifier: wasmKarmaCore.generateNullifier(`unblind_${token.id}`, newBlinding),

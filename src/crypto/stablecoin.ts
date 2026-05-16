@@ -7,6 +7,7 @@
  */
 
 import { TokenizedAsset } from "./rwaTokenization";
+import { secureRandomId } from "../utils/secureRandom";
 import { UTXO } from "./utxo";
 import { GhostIdentity } from "./ghostid";
 import { karmaSystem } from "./karmaSystem";
@@ -59,7 +60,7 @@ export class StablecoinManager {
   ): CreditVault {
     if (!asset.isVerified) throw new Error("Ativo RWA não verificado");
 
-    const vaultId = `vault_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const vaultId = `vault_${Date.now()}_${secureRandomId(4)}`;
     const collateralValue = asset.metadata.valuation;
     
     // Regra de colateral: Mínimo 150% (LTV 66%)
@@ -95,7 +96,7 @@ export class StablecoinManager {
     const userKarma = karmaSystem.getSpendableBalance();
     
     const offer: FiatOffer = {
-      id: `offer_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      id: `offer_${Date.now()}_${secureRandomId(4)}`,
       traderPk: Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join(''),
       type,
       amount,

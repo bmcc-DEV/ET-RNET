@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ParasiticArchitecture as PA } from "../crypto/supplyChain";
 import { animusBootstrap } from "../omega/AnimusBootstrap";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
+import { secureRandom, secureRandomId, secureRandomInt } from "../utils/secureRandom";
 
 export default function ParasiticArchitecture() {
   const [arch] = useState(() => new PA());
@@ -65,15 +66,15 @@ export default function ParasiticArchitecture() {
 
   const handleSimulateParasite = () => {
     const newHost = {
-      hostName: `sim_${Math.floor(Math.random() * 100)}`,
-      hostVersion: `${(Math.random() * 5).toFixed(1)}.0`,
+      hostName: `sim_${secureRandomInt(100)}`,
+      hostVersion: `${(secureRandom() * 5).toFixed(1)}.0`,
       parasiteName: `v0id-sim-${Date.now()}`,
-      parasiteHash: `sim_${Math.random().toString(16).slice(2, 10)}`,
+      parasiteHash: `sim_${secureRandomId(5)}`,
       hostIntegrity: "UNVERIFIED",
-      resourceUsage: Math.random() * 10,
-      isDetected: Math.random() > 0.8,
+      resourceUsage: secureRandom() * 10,
+      isDetected: secureRandom() > 0.8,
       killSwitch: false,
-      symbiosisScore: Math.floor(Math.random() * 40) + 50,
+      symbiosisScore: secureRandomInt(40) + 50,
     } as const;
 
     arch.registerHost(newHost);

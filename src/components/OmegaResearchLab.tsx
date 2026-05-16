@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef } from "react";
+import { secureRandom } from "../utils/secureRandom";
 import {
   approximateNullSpaceScore,
   buildTraceCommitment,
@@ -41,9 +42,9 @@ export default function OmegaResearchLab() {
     // 1. Gera imagem base (ruído ou padrão)
     const imageData = ctx.createImageData(200, 200);
     for (let i = 0; i < imageData.data.length; i += 4) {
-      imageData.data[i] = Math.random() * 255;     // R
-      imageData.data[i + 1] = Math.random() * 255; // G
-      imageData.data[i + 2] = Math.random() * 255; // B
+      imageData.data[i] = secureRandom() * 255;     // R
+      imageData.data[i + 1] = secureRandom() * 255; // G
+      imageData.data[i + 2] = secureRandom() * 255; // B
       imageData.data[i + 3] = 255;                 // A
     }
 

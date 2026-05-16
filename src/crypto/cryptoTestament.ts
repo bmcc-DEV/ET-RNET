@@ -35,6 +35,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { gfMul, gfInv } from "./gf256";
+import { secureRandomInt } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export function createTestament(
   masterKey: Uint8Array,
   config: RecoveryConfig,
 ): Testament {
-  const id = `testament_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+  const id = `testament_${Date.now()}_${secureRandomInt(10000)}`;
   const now = Date.now();
 
   // Fragmenta a DMK via Shamir (K=3, N=5)
@@ -237,7 +238,7 @@ export function createTestament(
       nonce,
       tag,
       commitment: `0x${commitment}`,
-      nodeId: `hcn_node_${Math.floor(Math.random() * 10000)}`,
+      nodeId: `hcn_node_${secureRandomInt(10000)}`,
       createdAt: now,
       expiresAt: now + config.testamentTTLDays * 24 * 60 * 60 * 1000,
     };

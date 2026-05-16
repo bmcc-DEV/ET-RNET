@@ -5,6 +5,8 @@
  * na energia disponível no hardware hospedeiro, calibrando o backscatter e o rádio ativo.
  */
 
+import { secureRandom } from "../utils/secureRandom";
+
 export enum PowerLevel {
   LEVEL_0_LATENT = 0,     // Zero Energia (Apenas OPFS)
   LEVEL_1_PASSIVE = 1,    // Beacon Passivo (Luz/Solar)
@@ -73,8 +75,8 @@ export class PowerGovernor {
     // Simulação da leitura contínua dos sensores do microcontrolador
     setInterval(() => {
        if (this.eternalNodeConnected) {
-         this.realMetrics.rfVoltage = 1.2 + Math.random() * 0.5; // Volts (RF Wi-Fi/LoRa)
-         this.realMetrics.thermalCurrent = 15 + Math.random() * 10; // uA (Seebeck TEG)
+         this.realMetrics.rfVoltage = 1.2 + secureRandom() * 0.5; // Volts (RF Wi-Fi/LoRa)
+         this.realMetrics.thermalCurrent = 15 + secureRandom() * 10; // uA (Seebeck TEG)
          this.recalculateHierarchy();
        }
     }, 2000);

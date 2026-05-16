@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { secureRandom } from "../utils/secureRandom";
 import {
   TemporalOracle,
   createTimeLockIntent,
@@ -51,7 +52,7 @@ export default function TemporalOracleLab() {
   useEffect(() => {
     const interval = setInterval(() => {
       setLivePrice(prev => {
-        const change = prev * (priceVolatility / 100) * (Math.random() * 2 - 1);
+        const change = prev * (priceVolatility / 100) * (secureRandom() * 2 - 1);
         return Math.max(100, +(prev + change).toFixed(2));
       });
     }, 2000);

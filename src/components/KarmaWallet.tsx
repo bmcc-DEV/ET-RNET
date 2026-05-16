@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { karmaSystem, type BlindKarmaToken, type KarmaWallet } from "../crypto/karmaSystem";
+import { secureRandomInt } from "../utils/secureRandom";
 
 export default function KarmaWalletPanel() {
   const [wallet, setWallet] = useState<KarmaWallet>({
@@ -27,7 +28,7 @@ export default function KarmaWalletPanel() {
   const handleMint = () => {
     // Simula mint de recompensa HCN
     const mockHcnSignature = crypto.getRandomValues(new Uint8Array(64));
-    karmaSystem.mintKarmaToken(10 + Math.floor(Math.random() * 20), mockHcnSignature);
+    karmaSystem.mintKarmaToken(10 + secureRandomInt(20), mockHcnSignature);
     setStatus("+Karma recebido do HCN (simulação de entrega)");
     refresh();
   };

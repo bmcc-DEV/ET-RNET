@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
 import { hcnStore, type HCNShard } from "../storage/hcnStore";
+import { secureRandomInt } from "../utils/secureRandom";
 
 type PeerType = {
   id: string;
@@ -119,7 +120,7 @@ export default function EternetDashboard() {
       // Fallback discovery simulator for presentation
       setTimeout(() => {
         setPeers((prev) => {
-          const id = `peer_ble_${Math.floor(Math.random() * 1000)}`;
+          const id = `peer_ble_${secureRandomInt(1000)}`;
           if (prev.some((p) => p.type === "BLE")) return prev;
           return [
             ...prev,
@@ -210,7 +211,7 @@ export default function EternetDashboard() {
   const [nodeAlias, setNodeAlias] = useState(() => {
     const saved = localStorage.getItem("void_eternet_alias");
     if (saved) return saved;
-    const randomName = `Node-${Math.floor(1000 + Math.random() * 9000)}`;
+    const randomName = `Node-${1000 + secureRandomInt(9000)}`;
     localStorage.setItem("void_eternet_alias", randomName);
     return randomName;
   });
@@ -319,7 +320,7 @@ export default function EternetDashboard() {
     if (!broadcastInput.trim()) return;
 
     const newShard = {
-      id: `shard_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      id: `shard_${Date.now()}_${secureRandomInt(1000)}`,
       data: btoa(broadcastInput),
       sender: nodeAlias,
       timestamp: Date.now(),

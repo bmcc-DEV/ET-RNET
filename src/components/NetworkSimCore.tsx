@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { secureRandom } from "../utils/secureRandom";
 
 export interface Node {
   id: string;
@@ -46,14 +47,14 @@ export function useNetworkSimulation(nodeCount = 15) {
     for (let i = 0; i < nodeCount; i++) {
       initialNodes.push({
         id: `mob_${i}`,
-        x: 100 + Math.random() * 460,
-        y: 50 + Math.random() * 320,
+        x: 100 + secureRandom() * 460,
+        y: 50 + secureRandom() * 320,
         type: "MOBILE",
         shards: [],
         range: 80,
         velocity: {
-          x: (Math.random() - 0.5) * 2,
-          y: (Math.random() - 0.5) * 2
+          x: (secureRandom() - 0.5) * 2,
+          y: (secureRandom() - 0.5) * 2
         }
       });
     }
@@ -96,7 +97,7 @@ export function useNetworkSimulation(nodeCount = 15) {
             const dist = Math.hypot(a.x - b.x, a.y - b.y);
             if (dist < a.range && a.shards.length > 0 && b.shards.length === 0) {
               // Transfer probability or logic
-              if (Math.random() < 0.05) { // Slow down for visualization
+              if (secureRandom() < 0.05) { // Slow down for visualization
                 const shard = a.shards[0];
                 // Check if already in trace
                 if (!traces.some(t => t.id === shard && t.to === b.id)) {

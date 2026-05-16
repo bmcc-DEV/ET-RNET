@@ -11,6 +11,7 @@
 
 import { UTXO, createUTXO } from "./utxo";
 import { GhostIdentity } from "./ghostid";
+import { secureRandomId } from "../utils/secureRandom";
 
 export interface SovStake {
   id: string;
@@ -91,7 +92,7 @@ export class SovTokenomics {
     const multiplier = 1.0 + (durationDays / 365) * 0.5; // Até 50% de bônus anual
     
     const stake: SovStake = {
-      id: `stake_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `stake_${Date.now()}_${secureRandomId(4)}`,
       stakerPk: Array.from(identity.publicKey).map(b => b.toString(16).padStart(2, '0')).join(''),
       amount,
       lockedUntil: Date.now() + (durationDays * 24 * 60 * 60 * 1000),

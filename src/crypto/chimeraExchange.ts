@@ -14,6 +14,7 @@
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
 import { blindMatch, type OrderIntent, type MatchResult, type OrderShard, fragmentOrder } from "./matchmaker";
+import { secureRandomId } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ export class ChimeraExchange {
    * Elei matcher via VRF (Verifiable Random Function).
    */
   private electMatcher(): string {
-    const hash = sha3_256(new TextEncoder().encode(`${Date.now()}_${Math.random()}`));
+    const hash = sha3_256(new TextEncoder().encode(`${Date.now()}_${secureRandomId(16)}`));
     return Array.from(hash.slice(0, 8))
       .map(b => b.toString(16).padStart(2, "0"))
       .join("");
@@ -210,7 +211,7 @@ export class ChimeraExchange {
     identity: GhostIdentity,
   ): ChimeraOrder {
     const orderIntent: OrderIntent = {
-      id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `order_${Date.now()}_${secureRandomId(3)}`,
       side,
       pair,
       amount,

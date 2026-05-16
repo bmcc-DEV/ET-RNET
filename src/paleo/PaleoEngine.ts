@@ -3,6 +3,11 @@
  *
  * O código-fonte não é mais um texto; é um fóssil.
  * O PaleoEngine extrai invariantes topológicos de binários (WASM/eBPF)
+ */
+
+import { secureRandomId } from "../utils/secureRandom";
+
+/**
  * para garantir que a lógica seja imutável e verificável matematicamente.
  */
 
@@ -80,7 +85,7 @@ export class PaleoEngine {
     
     return {
       isSatisfiable: true,
-      proof: `stark_proof_${Math.random().toString(36).substring(2, 10)}_verified`
+      proof: `stark_proof_${secureRandomId(5)}_verified`
     };
   }
 

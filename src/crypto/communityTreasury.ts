@@ -10,6 +10,8 @@
  * Referência: "O Livro do ETRNET" — Path 3: Governança Quântica Pura
  */
 
+import { secureRandomId } from "../utils/secureRandom";
+
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
 export type AllocationCategory =
@@ -112,7 +114,7 @@ const MAX_TRANSACTIONS = 10000;
 
 function generateId(prefix: string): string {
   const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 8);
+  const rand = secureRandomId(4);
   return `${prefix}_${ts}_${rand}`;
 }
 

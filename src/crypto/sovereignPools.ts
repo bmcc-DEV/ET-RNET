@@ -12,6 +12,7 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
+import { secureRandomId } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ export class SovereignPools {
    * Cria um novo Sovereign Investment Pool.
    */
   createPool(config: SIPConfig, _manager: GhostIdentity): SIPPool {
-    const poolId = `sip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const poolId = `sip_${Date.now()}_${secureRandomId(4)}`;
 
     const pool: SIPPool = {
       id: poolId,
@@ -130,7 +131,7 @@ export class SovereignPools {
     const shareAmount = BigInt(Math.floor(Number(amount) / pool.nav));
 
     const share: SIPShare = {
-      id: `share_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `share_${Date.now()}_${secureRandomId(3)}`,
       poolId,
       investorPk: Array.from(investor.publicKey).map(b => b.toString(16).padStart(2, "0")).join(""),
       shareAmount,
@@ -200,7 +201,7 @@ export class SovereignPools {
     if (!pool) throw new Error("Pool não encontrado");
 
     const proposal: HiddenProposal = {
-      id: `prop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `prop_${Date.now()}_${secureRandomId(3)}`,
       poolId,
       proposerPk: Array.from(proposer.publicKey).map(b => b.toString(16).padStart(2, "0")).join(""),
       encryptedStrategy,

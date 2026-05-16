@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useVoid } from "../core/useVoid";
 import { QRCodeSVG } from "../utils/qr";
+import { secureRandomInt } from "../utils/secureRandom";
 import {
   type SpawnProgress,
 } from "../crypto/ghostid";
@@ -213,7 +214,7 @@ export default function ActiveTerminal() {
         ticks += 10;
         setShards((prev) =>
           prev.map((s) => {
-            const nextProgress = Math.min(100, s.progress + Math.floor(Math.random() * 25) + 10);
+            const nextProgress = Math.min(100, s.progress + secureRandomInt(25) + 10);
             const nextStatus = nextProgress >= 100 ? "delivered" : "routing";
             return { ...s, progress: nextProgress, status: nextStatus as ShardType["status"] };
           })

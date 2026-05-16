@@ -12,6 +12,7 @@
 
 import { ghostLocker } from "./ghostLocker";
 import { paymentGateway, type PaymentResult } from "./paymentGateway";
+import { secureRandomId } from "../utils/secureRandom";
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { type GhostIdentity } from "./ghostid";
@@ -180,7 +181,7 @@ export class PhantomShopper {
 
     // 6. Registra compra
     const purchase: GhostPurchase = {
-      id: `phantom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `phantom_${Date.now()}_${secureRandomId(4)}`,
       marketplace: marketplaceName,
       itemDescription,
       itemPrice,

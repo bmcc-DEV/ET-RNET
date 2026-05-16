@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { secureRandomId, secureRandomInt } from "../utils/secureRandom";
 import {
   ShardValidator,
   minePoW,
@@ -53,7 +54,7 @@ export default function AntiSybilLab() {
     setMiningProgress(0);
     addLog("Iniciando mineração PoW para shard QEL...");
 
-    const ghostId = `void_◆_${Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0")}`;
+    const ghostId = `void_◆_${secureRandomInt(0xffff).toString(16).padStart(4, "0")}`;
     const commitment = `commit_${Date.now()}`;
     const difficulty = validator.getDifficulty();
 
@@ -118,11 +119,11 @@ export default function AntiSybilLab() {
 
       // Spam bot army: 200 shards per tick, no proper PoW (random data)
       for (let b = 0; b < 200; b++) {
-        const botId = `bot_${Math.floor(Math.random() * 10000)}`;
+        const botId = `bot_${secureRandomInt(10000)}`;
         const commitment = `spam_${Date.now()}_${b}`;
         const fakePow: PoWProof = {
-          nonce: Math.floor(Math.random() * 1000000),
-          hash: "deadbeef" + Math.random().toString(16).slice(2, 10),
+          nonce: secureRandomInt(1000000),
+          hash: "deadbeef" + secureRandomId(4),
           difficulty: validator.getDifficulty(),
           timestamp: Date.now(),
           iterations: 1,
@@ -130,7 +131,7 @@ export default function AntiSybilLab() {
         };
         const fakeVdf: VDFProof = {
           input: commitment,
-          result: "cafebabe" + Math.random().toString(16).slice(2, 10),
+          result: "cafebabe" + secureRandomId(4),
           iterations: 1000,
           elapsedMs: 1,
           challenge: "fake",

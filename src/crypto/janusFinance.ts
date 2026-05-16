@@ -14,6 +14,7 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { createUTXO, type UTXO, formatAmount } from "./utxo";
+import { secureRandomId, secureRandomInt } from "../utils/secureRandom";
 import { type GhostIdentity } from "./ghostid";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -197,11 +198,11 @@ export class JanusFinance {
 
     const now = Date.now();
     const cardNumber = this.generateCardNumber();
-    const cvv = Math.floor(100 + Math.random() * 900).toString();
+    const cvv = (100 + secureRandomInt(900)).toString();
     const expiry = new Date(now + 3600000); // 1 hora
 
     const card: VirtualCard = {
-      id: `card_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `card_${Date.now()}_${secureRandomId(3)}`,
       number: cardNumber,
       cvv,
       expiryDate: `${String(expiry.getMonth() + 1).padStart(2, "0")}/${String(expiry.getFullYear()).slice(2)}`,
@@ -220,10 +221,10 @@ export class JanusFinance {
 
   private generateCardNumber(): string {
     // Gera número no formato Visa/Mastercard
-    const prefix = Math.random() > 0.5 ? "4" : "5";
+    const prefix = secureRandomInt(2) === 0 ? "4" : "5";
     let number = prefix;
     for (let i = 1; i < 16; i++) {
-      number += Math.floor(Math.random() * 10).toString();
+      number += secureRandomInt(10).toString();
     }
     return number;
   }
@@ -254,7 +255,7 @@ export class JanusFinance {
     data: Omit<StatementLine, "id" | "timestamp" | "zkProof" | "nullifier">,
   ): StatementLine {
     const line: StatementLine = {
-      id: `stmt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `stmt_${Date.now()}_${secureRandomId(3)}`,
       timestamp: Date.now(),
       ...data,
       zkProof: "",  // Será preenchido

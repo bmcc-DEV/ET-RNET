@@ -15,6 +15,8 @@
  * - Nostr Wallet Connect (NWC) — descentralizado via Nostr
  */
 
+import { secureRandomInt } from "../utils/secureRandom";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PaymentItem {
@@ -104,7 +106,7 @@ class BitcoinPayment {
     const chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     let addr = "bc1q";
     for (let i = 0; i < 38; i++) {
-      addr += chars[Math.floor(Math.random() * chars.length)];
+      addr += chars[secureRandomInt(chars.length)];
     }
     return addr;
   }

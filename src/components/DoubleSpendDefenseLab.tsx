@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Flame, Cpu, AlertTriangle, Play, RefreshCw, Shield, Zap } from "lucide-react";
+import { secureRandomInt } from "../utils/secureRandom";
 import {
   HardwareEnclaveModule,
   SlashingDefenseEngine,
@@ -78,7 +79,7 @@ export default function DoubleSpendDefenseLab() {
 
       await new Promise(r => setTimeout(r, 400));
       addLog("Wallet.init(): gerando GhostID efêmero para Alice...", "info");
-      addLog(`GhostID: void_◆_${Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0")}`, "success");
+      addLog(`GhostID: void_◆_${secureRandomInt(0xffff).toString(16).padStart(4, "0")}`, "success");
 
       await new Promise(r => setTimeout(r, 300));
       addLog("Enclave.SGX.init(): carregando módulo WASM de contadores...", "info");

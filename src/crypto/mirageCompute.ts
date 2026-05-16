@@ -14,6 +14,7 @@ import { sha3_256 } from "@noble/hashes/sha3.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { createUTXO, type UTXO } from "./utxo";
 import { type GhostIdentity } from "./ghostid";
+import { secureRandomId } from "../utils/secureRandom";
 import { signWithNodeKey } from "./signingKeys";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ export class MirageCompute {
       const encrypted = cipher.encrypt(slice);
 
       const fragment: CodeFragment = {
-        id: `frag_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+        id: `frag_${Date.now()}_${i}_${secureRandomId(3)}`,
         index: i,
         bytecode: encrypted as Uint8Array,
         encryptedWith: ephemeralKey,
@@ -121,7 +122,7 @@ export class MirageCompute {
    * Cria um enclave efêmero que existe apenas durante a execução.
    */
   createEnclave(durationMs = 5000): EnclaveState {
-    const enclaveId = `enclave_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const enclaveId = `enclave_${Date.now()}_${secureRandomId(4)}`;
 
     const enclave: EnclaveState = {
       id: enclaveId,
@@ -170,7 +171,7 @@ export class MirageCompute {
     executorIdentity: GhostIdentity,
     paymentAmount: bigint = 100n,
   ): Promise<MirageExecution> {
-    const executionId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const executionId = `exec_${Date.now()}_${secureRandomId(4)}`;
 
     // 1. Cria enclave efêmero
     const enclave = this.createEnclave(10000);

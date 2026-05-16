@@ -13,6 +13,7 @@
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { type GhostIdentity } from "./ghostid";
+import { secureRandomId } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export class AegisVault {
    * Cria um novo cofre Aegis para um GhostID.
    */
   createVault(owner: GhostIdentity, heirs: string[] = []): VaultState {
-    const vaultId = `vault_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const vaultId = `vault_${Date.now()}_${secureRandomId(4)}`;
 
     const vault: VaultState = {
       id: vaultId,
@@ -174,7 +175,7 @@ export class AegisVault {
     if (!vault || !vault.isActive) return null;
 
     const challenge: BiometricChallenge = {
-      challengeId: `bio_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      challengeId: `bio_${Date.now()}_${secureRandomId(3)}`,
       pattern: crypto.getRandomValues(new Uint8Array(16)),
       expectedResponse: new Uint8Array(32), // Será preenchido pelo owner
       expiresAt: Date.now() + 10000, // 10 segundos para responder

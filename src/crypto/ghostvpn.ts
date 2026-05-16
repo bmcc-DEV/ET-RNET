@@ -17,6 +17,7 @@
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { spawnGhostId, type GhostIdentity } from "./ghostid";
 import { fragmentMessage } from "./qel";
+import { secureRandomId, secureRandomInt } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -163,7 +164,7 @@ export class GhostVPN {
         // Adiciona header de roteamento multi-canal
         const routeHeader = new Uint8Array(32);
         // Canal recomendado: BLE(0), LoRa(1), HCN(2), WebRTC(3)
-        routeHeader[0] = Math.floor(Math.random() * 4);
+        routeHeader[0] = secureRandomInt(4);
         routeHeader.set(sha3_256(data).slice(0, 31), 1);
         const combined = new Uint8Array(routeHeader.length + data.length);
         combined.set(routeHeader);
@@ -234,7 +235,7 @@ export class GhostVPN {
       active: false,
       async process(data: Uint8Array): Promise<Uint8Array> {
         // Adiciona padding aleatório para ofuscar tamanho real
-        const paddingLen = Math.floor(Math.random() * 64) + 16;
+        const paddingLen = secureRandomInt(64) + 16;
         const padding = crypto.getRandomValues(new Uint8Array(paddingLen));
         const combined = new Uint8Array(4 + paddingLen + data.length);
         const view = new DataView(combined.buffer);
@@ -299,7 +300,7 @@ export class GhostVPN {
 
     // 5. Cria sessão
     this.session = {
-      id: `vpn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `vpn_${Date.now()}_${secureRandomId(4)}`,
       identity,
       startedAt: Date.now(),
       bytesRouted: 0,

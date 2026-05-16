@@ -24,6 +24,7 @@
 
 import { sha3_256 } from "@noble/hashes/sha3.js";
 import { ed25519 }  from "@noble/curves/ed25519.js";
+import { secureRandomInt } from "../utils/secureRandom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ export function createTimeLockIntent(params: {
   traderPrivKey:    Uint8Array;   // Ed25519 private key (32 bytes)
 }): TemporalIntent {
   const now = Date.now();
-  const id  = `tio_${now}_${Math.floor(Math.random() * 100000)}`;
+  const id  = `tio_${now}_${secureRandomInt(100000)}`;
 
   // Secret: random 32 bytes, usado para fechar/abrir o price commitment
   const intentSecret = crypto.getRandomValues(new Uint8Array(32));

@@ -1,3 +1,5 @@
+import { secureRandomInt } from "../utils/secureRandom";
+
 export default function Hero() {
   return (
     <section className="relative overflow-hidden border-b border-[#14181c]">
@@ -16,7 +18,7 @@ export default function Hero() {
           <span>/</span>
           <span className="text-[#6cf0ff]">br/acc</span>
           <span>/</span>
-          <span>BUILD 0x{Math.floor(Math.random() * 0xfffff).toString(16).padStart(5, "0").toUpperCase()}</span>
+          <span>BUILD 0x{secureRandomInt(0xfffff).toString(16).padStart(5, "0").toUpperCase()}</span>
         </div>
 
         <h1 className="font-sans font-light text-[42px] md:text-[88px] leading-[0.95] tracking-tight text-zinc-100 mb-8">

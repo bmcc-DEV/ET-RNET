@@ -14,13 +14,16 @@
  * - Qualquer pool Stratum v1
  */
 
+import { secureRandomInt } from "../utils/secureRandom";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface MiningConfig {
-  poolUrl: string;
-  poolPort: number;
-  walletAddress: string;
-  workerName: string;
+  proxyUrl?: string;      // WebSocket proxy (padrão: ws://localhost:8443)
+  poolUrl: string;        // ex: "gulf.moneroocean.stream"
+  poolPort: number;       // ex: 10128
+  walletAddress: string;  // Monero (4xxx) ou Ravencoin (RXxxx)
+  workerName: string;     // ex: "void-node-001"
   algorithm: "randomx" | "kawpow" | "ethash" | "argon2";
 }
 
@@ -56,38 +59,49 @@ export interface StratumMessage {
 
 class StratumClient {
   private ws: WebSocket | null = null;
-  private url: string;
-  private port: number;
+  private proxyUrl: string;
+  private poolHost: string;
+  private poolPort: number;
   private wallet: string;
   private worker: string;
-  private messageId: number = 1;
+  private messageId: number = 0;
   private connected: boolean = false;
   private onJobCallback: ((job: MiningJob) => void) | null = null;
   private onResultCallback: ((result: any) => void) | null = null;
+  private subscribeId: number = 0;
+  private authorizeId: number = 0;
 
   constructor(config: MiningConfig) {
-    this.url = config.poolUrl;
-    this.port = config.poolPort;
+    this.proxyUrl = config.proxyUrl || "ws://localhost:8443";
+    this.poolHost = (config.poolUrl || "").trim();
+    this.poolPort = parseInt(String(config.poolPort), 10);
     this.wallet = config.walletAddress;
     this.worker = config.workerName;
+  }
+
+  private nextId(): number {
+    return ++this.messageId;
   }
 
   connect(): Promise<boolean> {
     return new Promise((resolve) => {
       try {
-        this.ws = new WebSocket(`wss://${this.url}:${this.port}`);
+        this.ws = new WebSocket(this.proxyUrl);
 
         this.ws.onopen = () => {
-          console.log(`[Stratum] Conectado a ${this.url}:${this.port}`);
-          this.connected = true;
-          this.login();
-          resolve(true);
+          console.log(`[Stratum] Conectado ao proxy ${this.proxyUrl}`);
+          // Pedir ao proxy para conectar ao pool
+          this.sendRaw({
+            id: this.nextId(),
+            method: "proxy.connect",
+            params: [this.poolHost, this.poolPort],
+          });
         };
 
         this.ws.onmessage = (event) => {
           try {
             const msg: StratumMessage = JSON.parse(event.data);
-            this.handleMessage(msg);
+            this.handleMessage(msg, resolve);
           } catch (e) {
             console.error("[Stratum] Erro ao parsear mensagem:", e);
           }
@@ -109,64 +123,118 @@ class StratumClient {
     });
   }
 
-  private login() {
-    this.send({
-      id: this.messageId++,
-      method: "login",
-      params: [
-        this.wallet,
-        this.worker,
-        "VOID-Miner/1.0",
-      ],
+  private handleMessage(msg: any, connectResolve?: (v: boolean) => void) {
+    // Resposta do proxy.connect
+    if (msg.method === "proxy.connected") {
+      console.log("[Stratum] Pool conectado via proxy, autenticando...");
+      this.connected = true;
+      this.subscribe();
+      return;
+    }
+
+    // Erro do proxy
+    if (msg.method === "proxy.error") {
+      console.error("[Stratum] Proxy error:", msg.params?.[0]);
+      this.connected = false;
+      connectResolve?.(false);
+      return;
+    }
+
+    // Pool desconectou
+    if (msg.method === "proxy.pool_closed") {
+      console.warn("[Stratum] Pool fechou a conexão");
+      this.connected = false;
+      return;
+    }
+
+    if (!this.connected && !msg.id) return;
+
+    // Resposta ao mining.subscribe
+    if (msg.id === this.subscribeId && msg.id > 0 && msg.result !== undefined) {
+      if (msg.result === false || msg.error) {
+        console.error("[Stratum] Subscribe falhou:", msg.error);
+        connectResolve?.(false);
+        return;
+      }
+      console.log("[Stratum] Subscribe OK");
+      this.authorize();
+      connectResolve?.(true);
+      return;
+    }
+
+    // Resposta ao mining.authorize
+    if (msg.id === this.authorizeId && msg.id > 0) {
+      if (msg.result === false || msg.error) {
+        console.error("[Stratum] Authorize falhou:", msg.error);
+        connectResolve?.(false);
+        return;
+      }
+      console.log("[Stratum] Authorize OK — minerando!");
+      connectResolve?.(true);
+      return;
+    }
+
+    // Job do pool (mining.notify)
+    if (msg.method === "mining.notify" && msg.params) {
+      const p = msg.params;
+      const job: MiningJob = {
+        jobId: p[0] || "",
+        blob: p[1] || "",
+        target: p[2] || "",
+        height: p[3] || 0,
+        difficulty: p[4] || 0,
+      };
+      console.log(`[Stratum] Job: ${job.jobId} (height ${job.height})`);
+      this.onJobCallback?.(job);
+      return;
+    }
+
+    // Resultado de share (submit response)
+    if (msg.id !== undefined && msg.id > 2 && msg.result !== undefined) {
+      this.onResultCallback?.({
+        id: msg.id,
+        accepted: msg.result === true || msg.result === "true",
+        error: msg.error,
+      });
+      return;
+    }
+
+    // mining.set.difficulty
+    if (msg.method === "mining.set.difficulty" && msg.params) {
+      console.log(`[Stratum] Diff: ${msg.params[0]}`);
+      return;
+    }
+  }
+
+  private subscribe() {
+    this.subscribeId = this.nextId();
+    this.sendRaw({
+      id: this.subscribeId,
+      method: "mining.subscribe",
+      params: ["VOID-Miner/1.0"],
     });
   }
 
-  private handleMessage(msg: StratumMessage) {
-    // Resposta ao login
-    if (msg.id === 1 && msg.result) {
-      console.log("[Stratum] Login OK:", msg.result);
-      if (msg.result.job) {
-        this.onJobCallback?.(this.parseJob(msg.result.job));
-      }
-    }
-
-    // Novo job do pool
-    if (msg.method === "job") {
-      const job = this.parseJob(msg.params);
-      this.onJobCallback?.(job);
-    }
-
-    // Resultado de share
-    if (msg.id && msg.result !== undefined) {
-      this.onResultCallback?.({ id: msg.id, accepted: msg.result === true, error: msg.error });
-    }
+  private authorize() {
+    this.authorizeId = this.nextId();
+    this.sendRaw({
+      id: this.authorizeId,
+      method: "mining.authorize",
+      params: [this.wallet, this.worker],
+    });
   }
 
-  private parseJob(params: any): MiningJob {
-    return {
-      jobId: params.job_id || params.id || "",
-      blob: params.blob || "",
-      target: params.target || "",
-      height: params.height || 0,
-      difficulty: params.difficulty || 0,
-    };
-  }
-
-  send(msg: StratumMessage) {
-    if (this.ws && this.connected) {
+  private sendRaw(msg: any) {
+    if (this.ws && this.ws.readyState === 1) {
       this.ws.send(JSON.stringify(msg));
     }
   }
 
   submitShare(jobId: string, nonce: string, result: string) {
-    this.send({
-      id: this.messageId++,
-      method: "submit",
-      params: [
-        jobId,
-        nonce,
-        result,
-      ],
+    this.sendRaw({
+      id: this.nextId(),
+      method: "mining.submit",
+      params: [this.wallet, jobId, nonce, result],
     });
   }
 
@@ -179,6 +247,7 @@ class StratumClient {
   }
 
   disconnect() {
+    this.sendRaw({ method: "proxy.disconnect" });
     this.ws?.close();
     this.connected = false;
   }
@@ -399,7 +468,7 @@ export class CryptoMiner {
 
     this.stats.isRunning = true;
     this.stats.uptime = Date.now();
-    this.nonce = Math.floor(Math.random() * 0xFFFFFFFF);
+    this.nonce = secureRandomInt(0xFFFFFFFF);
 
     console.log(`[Miner] Iniciando mineração em ${this.config?.poolUrl}`);
     console.log(`[Miner] Algoritmo: ${this.config?.algorithm}`);

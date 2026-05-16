@@ -92,14 +92,35 @@ export function satisfiesDifficulty(hash: string, difficulty: number): boolean {
 
 /**
  * Minera um PoW para um shard QEL.
- * O dispositivo deve gastar ciclos de CPU/bateria para encontrar o nonce.
+ * Tenta GPU primeiro (WebGPU), fallback CPU.
  */
-export function minePoW(
+export async function minePoW(
   ghostId: string,
   shardCommitment: string,
   difficulty: number,
   maxIterations = 10_000_000,
-): PoWProof {
+): Promise<PoWProof> {
+  const { gpuMiner } = await import("./gpuMiner");
+
+  // Tentar GPU primeiro
+  const gpuResult = await gpuMiner.mine({
+    challenge: shardCommitment,
+    difficulty,
+    prefix: `${ghostId}|${shardCommitment}|`,
+  }, maxIterations);
+
+  if (gpuResult.found) {
+    return {
+      nonce: gpuResult.nonce,
+      hash: gpuResult.hash,
+      difficulty,
+      timestamp: Date.now(),
+      iterations: gpuResult.iterations,
+      elapsedMs: gpuResult.elapsedMs,
+    };
+  }
+
+  // Fallback CPU (SHA3 real)
   const start = performance.now();
   const base = `${ghostId}|${shardCommitment}|`;
   let nonce = 0;

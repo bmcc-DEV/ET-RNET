@@ -65,7 +65,7 @@ export default function AntiSybilLab() {
       setMiningProgress((i + 1) * 5);
     }
 
-    const proof = minePoW(ghostId, commitment, difficulty);
+    const proof = await minePoW(ghostId, commitment, difficulty);
     setLastPoW(proof);
     addLog(`✓ PoW minerado! Nonce: ${proof.nonce} | Iterações: ${proof.iterations}`);
     addLog(`  Hash: ${proof.hash.slice(0, 20)}... | Tempo: ${proof.elapsedMs.toFixed(1)}ms`);
@@ -102,7 +102,7 @@ export default function AntiSybilLab() {
     const totalTicks = 50;
     let tick = 0;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       tick++;
 
       // Legitimate user: 1 shard every 2 ticks, proper PoW + VDF
@@ -110,7 +110,7 @@ export default function AntiSybilLab() {
         const ghostId = `legit_user_001`;
         const commitment = `legit_${Date.now()}_${tick}`;
         const difficulty = validator.getDifficulty();
-        const pow = minePoW(ghostId, commitment, difficulty, 500000);
+        const pow = await minePoW(ghostId, commitment, difficulty, 500000);
         const vdf = computeVDF(commitment, 500, `ch_${tick}`);
         const res = validator.validateShard(ghostId, commitment, pow, vdf);
         if (res.accepted) legitCount++;

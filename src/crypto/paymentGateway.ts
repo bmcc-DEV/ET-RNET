@@ -54,7 +54,7 @@ class LightningPayment {
     this.createdAt = Date.now();
   }
 
-  private generateBolt11(amount: number, label: string): string {
+  private generateBolt11(amount: number, _label: string): string {
     // BOLT11 invoice format (simplificado)
     // Em produção, usar biblioteca lnbits ou lnd
     const prefix = "lnbc";
@@ -91,7 +91,6 @@ class LightningPayment {
 class BitcoinPayment {
   private address: string;
   private amountSat: number;
-  private txid: string | null = null;
   private confirmations: number = 0;
 
   constructor(amountSat: number) {
@@ -147,11 +146,9 @@ class BitcoinPayment {
 // ─── Nostr Wallet Connect (NWC) ──────────────────────────────────────────────
 
 class NWCPayment {
-  private walletPubkey: string;
   private amountSat: number;
 
-  constructor(walletPubkey: string, amountSat: number) {
-    this.walletPubkey = walletPubkey;
+  constructor(_walletPubkey: string, amountSat: number) {
     this.amountSat = amountSat;
   }
 

@@ -104,15 +104,24 @@ export async function minePoW(
   const { hgpuPoW } = await import("./hgpuCompute");
   const hgpuResult = hgpuPoW(difficulty, Math.min(maxIterations, 100000));
 
+  // Verificar se HGPU encontrou hash válido com SHA3 real
   if (hgpuResult.found) {
-    return {
-      nonce: hgpuResult.nonce,
-      hash: hgpuResult.hash,
-      difficulty,
-      timestamp: Date.now(),
-      iterations: hgpuResult.iterations,
-      elapsedMs: hgpuResult.elapsedMs,
-    };
+    const base = `${ghostId}|${shardCommitment}|`;
+    const data = base + hgpuResult.nonce;
+    const realHash = Array.from(sha3_256(new TextEncoder().encode(data)) as Uint8Array)
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    if (satisfiesDifficulty(realHash, difficulty)) {
+      return {
+        nonce: hgpuResult.nonce,
+        hash: realHash,
+        difficulty,
+        timestamp: Date.now(),
+        iterations: hgpuResult.iterations,
+        elapsedMs: hgpuResult.elapsedMs,
+      };
+    }
   }
 
   // 2. Tentar GPU WebGPU

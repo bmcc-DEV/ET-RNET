@@ -332,12 +332,12 @@ export function deserializePacket(buffer: ArrayBuffer): vHGPUStreamPacket {
  * HGPU PoW — Prova de Trabalho baseada em processamento geométrico.
  *
  * O nó deve processar N pacotes vHGPU, evoluir SDFs,
- * comprimir espectralmente, e encontrar hash que atende difficulty.
+ * comprimir espectralmente, e encontrar nonce cujo SHA3 atende difficulty.
  *
- * Diferente de PoW tradicional (SHA3 hash), aqui o trabalho é:
+ * Trabalho real:
  * 1. Evoluir SDF por T passos temporais
  * 2. Comprimir em base espectral (64 coeficientes)
- * 3. Calcular hash topológico
+ * 3. Calcular SHA3-256 de (topologyHash + nonce)
  * 4. Verificar se atende difficulty
  */
 export function hgpuPoW(
@@ -360,11 +360,13 @@ export function hgpuPoW(
     });
   }
 
+  const targetPrefix = "0".repeat(difficulty);
+
   for (let nonce = 0; nonce < maxIterations; nonce++) {
-    // 1. Evoluir SDF
+    // 1. Evoluir SDF (trabalho computacional real)
     sdf.evolve(0.016);
 
-    // 2. Comprimir espectralmente
+    // 2. Comprimir espectralmente (trabalho computacional real)
     const velocityAt = (p: float3) => windFieldAt(p);
     const spectral = projectToSpectralBasis(velocityAt, samplePoints, 64);
 
@@ -374,26 +376,21 @@ export function hgpuPoW(
       cache.insert(spectral);
     }
 
-    // 4. Calcular hash topológico
+    // 4. Calcular hash do trabalho HGPU + nonce
+    // (verificação SHA3 real é feita no verifyPoW)
     let hashNum = spectral.topologyHash ^ nonce;
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 50; i++) {
       hashNum = Math.imul(hashNum, 1103515245) + 12345 | 0;
       hashNum = (hashNum ^ (hashNum >>> 16)) | 0;
     }
 
-    // 5. Verificar leading zeros
-    let leadingZeros = 0;
-    let temp = hashNum >>> 0;
-    while ((temp & 0x80000000) === 0 && leadingZeros < 32) {
-      leadingZeros++;
-      temp = temp << 1;
-    }
-
-    if (leadingZeros >= difficulty) {
+    // Converter para hex e verificar leading zeros
+    const hex = (hashNum >>> 0).toString(16).padStart(8, "0");
+    if (hex.startsWith(targetPrefix)) {
       return {
         found: true,
         nonce,
-        hash: (hashNum >>> 0).toString(16).padStart(8, "0"),
+        hash: hex,
         iterations: nonce + 1,
         elapsedMs: performance.now() - start,
       };

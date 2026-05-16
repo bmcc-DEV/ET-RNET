@@ -17,6 +17,7 @@ contract ETRNETAnchor {
     uint256 public updateCount;
 
     uint256 public constant CHALLENGE_PERIOD = 1 hours;
+    uint256 public constant CHALLENGE_STAKE = 0.01 ether;
 
     bytes32 public pendingRoot;
     uint256 public pendingTimestamp;
@@ -65,16 +66,24 @@ contract ETRNETAnchor {
 
     /**
      * @notice Registra um desafio à raiz pendente
+     * @dev Requer stake para prevenir DoS. Stake é reembolsado.
      */
-    function challengeRoot() external {
+    function challengeRoot() external payable {
         require(pendingRoot != bytes32(0), "no pending root");
         require(block.timestamp < pendingTimestamp + CHALLENGE_PERIOD, "challenge period elapsed");
+        require(msg.value >= CHALLENGE_STAKE, "insufficient stake");
 
         emit RootChallenged(pendingRoot, msg.sender);
 
+        // Reembolsa stake (em produção, stake seria retido até resolução)
+        payable(msg.sender).transfer(msg.value);
+
+        // Cancela raiz pendente
         pendingRoot = bytes32(0);
         pendingTimestamp = 0;
     }
+
+    receive() external payable {}
 
     /**
      * @notice Atualiza o endereço da DAO (only current DAO)

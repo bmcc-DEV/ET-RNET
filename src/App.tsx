@@ -55,6 +55,9 @@ const LuaPluginPanel = lazy(() => import("./components/LuaPluginPanel"));
 const VhgpuFarmPanel = lazy(() => import("./components/VhgpuFarmPanel"));
 const QuantumDaoPanel = lazy(() => import("./components/QuantumDaoPanel"));
 const PoWFaucetPanel = lazy(() => import("./components/PoWFaucetPanel"));
+const DoubleSpendDefenseLab = lazy(() => import("./components/DoubleSpendDefenseLab"));
+const AntiSybilLab = lazy(() => import("./components/AntiSybilLab"));
+const TemporalOracleLab = lazy(() => import("./components/TemporalOracleLab"));
 
 function LoadingFallback() {
   return (
@@ -153,6 +156,11 @@ export default function App() {
           {/* === GOVERNANÇA QUÂNTICA (PATH 3) === */}
           <QuantumDaoPanel />
           <PoWFaucetPanel />
+
+          {/* === LABS DE SEGURANÇA === */}
+          <AntiSybilLab />
+          <DoubleSpendDefenseLab />
+          <TemporalOracleLab />
 
           {/* === HYDRA & OMEGA === */}
           <Hydra />

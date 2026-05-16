@@ -5,10 +5,15 @@ export function secureRandomId(bytes: number = 4): string {
   return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Gera inteiro aleatório seguro em [0, max). */
+/** Gera inteiro aleatório seguro em [0, max) — sem modulo bias (rejection sampling). */
 export function secureRandomInt(max: number): number {
+  if (max <= 0) return 0;
+  // Rejection sampling: descarta valores que causariam bias
+  const limit = Math.floor(0x100000000 / max) * max;
   const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
+  do {
+    crypto.getRandomValues(buf);
+  } while (buf[0] >= limit);
   return buf[0] % max;
 }
 

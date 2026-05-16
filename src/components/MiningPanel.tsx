@@ -18,8 +18,9 @@ export default function MiningPanel() {
     pool: "",
     algorithm: "",
   });
-  const [poolUrl, setPoolUrl] = useState("pool.moneroocean.com");
-  const [poolPort, setPoolPort] = useState("443");
+  const [proxyUrl, setProxyUrl] = useState("ws://localhost:8443");
+  const [poolUrl, setPoolUrl] = useState("gulf.moneroocean.stream");
+  const [poolPort, setPoolPort] = useState("10128");
   const [walletAddress, setWalletAddress] = useState("");
   const [workerName, setWorkerName] = useState("void-node-001");
   const [algorithm, setAlgorithm] = useState<"randomx" | "kawpow" | "ethash" | "argon2">("randomx");
@@ -52,6 +53,7 @@ export default function MiningPanel() {
     addLog(`Conectando a ${poolUrl}:${poolPort}...`);
 
     const success = await cryptoMiner.init({
+      proxyUrl,
       poolUrl,
       poolPort: parseInt(poolPort),
       walletAddress,
@@ -108,6 +110,17 @@ export default function MiningPanel() {
 
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
+            <label className="text-xs text-zinc-500 block mb-1">Proxy WebSocket</label>
+            <input
+              type="text"
+              value={proxyUrl}
+              onChange={(e) => setProxyUrl(e.target.value)}
+              placeholder="ws://localhost:8443"
+              className="w-full bg-[#0c0e12] border border-[#14181c] rounded px-3 py-2 text-sm font-mono text-zinc-300"
+              disabled={stats.isRunning}
+            />
+          </div>
+          <div>
             <label className="text-xs text-zinc-500 block mb-1">Pool URL</label>
             <input
               type="text"
@@ -117,8 +130,11 @@ export default function MiningPanel() {
               disabled={stats.isRunning}
             />
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">Porta</label>
+            <label className="text-xs text-zinc-500 block mb-1">Porta do Pool (TCP/Stratum)</label>
             <input
               type="text"
               value={poolPort}

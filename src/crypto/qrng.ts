@@ -71,7 +71,6 @@ class QRNG {
    * ANU → IBM → Local (crypto.getRandomValues)
    */
   async getQuantumBytes(bits: number = 256): Promise<QRNGResult> {
-    const bytes = Math.ceil(bits / 8);
     const cacheKey = `${this.config.preferredSource}_${bits}`;
 
     // Verifica cache

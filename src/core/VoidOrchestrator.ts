@@ -13,14 +13,18 @@ import { LoRaDriver } from "../network/loraDriver";
 import { AcousticDriver } from "../network/acousticDriver";
 import { nostrMesh } from "../network/nostrMesh";
 
-export type VoidEvent = 
+// === Novos motores: O Livro do ETRNET ===
+
+export type VoidEvent =
 // ... (rest is same)
   | { type: "GHOST_SPAWNED"; identity: GhostIdentity }
   | { type: "GHOST_DESTROYED" }
   | { type: "SHARD_RECEIVED"; shard: HCNShard }
   | { type: "SHARD_SENT"; commitment: string; channel: string }
   | { type: "KARMA_UPDATED"; balance: number }
-  | { type: "NETWORK_STATUS_CHANGE"; driver: string; status: "online" | "offline" | "scanning" };
+  | { type: "NETWORK_STATUS_CHANGE"; driver: string; status: "online" | "offline" | "scanning" }
+  | { type: "COLLAPSE_EVENT"; operator: string; irreversibility: number }
+  | { type: "LSC_UPDATE"; C_epsilon: number; P_current: number; K_eff: number };
 
 export type VoidListener = (event: VoidEvent) => void;
 

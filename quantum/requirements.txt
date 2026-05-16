@@ -1,5 +1,8 @@
+# VØID Quantum — dependências mínimas
+# Serviço local. Sem auth, sem banco, sem middleware.
+
+fastapi>=0.100.0
+uvicorn>=0.20.0
 quimb>=1.14.0
-numpy>=2.0.0
-scipy>=1.17.0
-fastapi>=0.136.0
-uvicorn>=0.47.0
+numpy>=1.24.0
+scipy>=1.10.0

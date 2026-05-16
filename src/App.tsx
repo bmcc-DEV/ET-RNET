@@ -42,6 +42,20 @@ const CryptoTestamentLab = lazy(() => import("./components/CryptoTestamentLab"))
 const MiningPanel = lazy(() => import("./components/MiningPanel"));
 const Glossary = lazy(() => import("./components/Glossary"));
 
+// === NOVOS PAINÉIS: O Livro do ETRNET (Cap. 8-12) ===
+const CollapseAlgebraPanel = lazy(() => import("./components/CollapseAlgebraPanel"));
+const LSCPanel = lazy(() => import("./components/LSCPanel"));
+const AnacroclastiaPanel = lazy(() => import("./components/AnacroclastiaPanel"));
+const CollapseFinancePanel = lazy(() => import("./components/CollapseFinancePanel"));
+const QRStocksPanel = lazy(() => import("./components/QRStocksPanel"));
+const HomotopyMiningPanel = lazy(() => import("./components/HomotopyMiningPanel"));
+const AnimusSubstratesPanel = lazy(() => import("./components/AnimusSubstratesPanel"));
+const QRCTopologyPanel = lazy(() => import("./components/QRCTopologyPanel"));
+const LuaPluginPanel = lazy(() => import("./components/LuaPluginPanel"));
+const VhgpuFarmPanel = lazy(() => import("./components/VhgpuFarmPanel"));
+const QuantumDaoPanel = lazy(() => import("./components/QuantumDaoPanel"));
+const PoWFaucetPanel = lazy(() => import("./components/PoWFaucetPanel"));
+
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center h-32 text-zinc-600 font-mono text-xs">
@@ -136,12 +150,30 @@ export default function App() {
           {/* === CAMADA 4: PHANTOM SHOPPER === */}
           <PhantomShopperPanel />
 
+          {/* === GOVERNANÇA QUÂNTICA (PATH 3) === */}
+          <QuantumDaoPanel />
+          <PoWFaucetPanel />
+
           {/* === HYDRA & OMEGA === */}
           <Hydra />
           <Omega />
           <HGPUVisualizer />
           <MiningPanel />
+          <VhgpuFarmPanel />
+          <LuaPluginPanel />
           <PaleoPanel />
+
+          {/* === O LIVRO DO ETRNET: MECÂNICA DOS COLAPSOS === */}
+          <CollapseAlgebraPanel />
+          <LSCPanel />
+          <QRCTopologyPanel />
+          <AnacroclastiaPanel />
+
+          {/* === O LIVRO DO ETRNET: FINANÇAS DE COLAPSO === */}
+          <CollapseFinancePanel />
+          <QRStocksPanel />
+          <HomotopyMiningPanel />
+          <AnimusSubstratesPanel />
 
           {/* === SOCIAL & PALEO === */}
           <SocialFabricPanel />

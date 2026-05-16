@@ -424,3 +424,115 @@ export function parseAmount(amountStr: string, decimals = 4): bigint {
   const fraction = BigInt((parts[1] || "").padEnd(decimals, "0").slice(0, decimals));
   return whole * (10n ** BigInt(decimals)) + fraction;
 }
+
+// ─── HTLC (Hash Time-Lock Contract) ─────────────────────────────────────────
+
+/**
+ * UTXO com Hash Time-Lock para swaps atômicos.
+ *
+ * Permite troca de tokens entre duas partes sem confiança:
+ * - Alice cria HTLC com hashLock = SHA3(preimage)
+ * - Bob pode gastar revelando preimage (claim)
+ * - Se Bob não reivindica, Alice pode reembolsar após timelock (refund)
+ */
+export interface HTLCUTXO extends UTXO {
+  /** SHA3-256(preimage) — quem conhece preimage pode gastar */
+  hashLock: Uint8Array;
+  /** Timestamp após o qual o remetente pode reembolsar */
+  timeLock: number;
+  /** Chave pública do remetente (para refund) */
+  refundPubKey: Uint8Array;
+}
+
+/**
+ * Cria um UTXO com Hash Time-Lock.
+ *
+ * @param amount - Valor do UTXO
+ * @param recipientPubKey - Chave pública do destinatário (quem pode claimar)
+ * @param preimage - Segredo que o destinatário deve revelar para gastar
+ * @param refundPubKey - Chave pública do remetente (para reembolso após timelock)
+ * @param timelockMs - Duração do timelock em ms (padrão: 1 hora)
+ */
+export function createHTLC(
+  amount: bigint,
+  recipientPubKey: Uint8Array,
+  preimage: Uint8Array,
+  refundPubKey: Uint8Array,
+  timelockMs: number = 3600000,
+): HTLCUTXO {
+  // Hash lock = SHA3-256(preimage)
+  const hashLock = sha3_256(preimage) as Uint8Array;
+
+  // Cria UTXO base
+  const base = createUTXO(amount, recipientPubKey);
+
+  return {
+    ...base,
+    hashLock,
+    timeLock: Date.now() + timelockMs,
+    refundPubKey,
+  };
+}
+
+/**
+ * Reivindica um HTLC revelando o preimage.
+ * Verifica se SHA3(preimage) === hashLock.
+ *
+ * @param htlc - UTXO HTLC a ser reivindicado
+ * @param preimage - Segredo revelado
+ * @returns true se a reivindicação é válida
+ */
+export function claimHTLC(htlc: HTLCUTXO, preimage: Uint8Array): boolean {
+  if (htlc.spent) return false;
+
+  const hash = sha3_256(preimage) as Uint8Array;
+  const valid = hash.every((b, i) => b === htlc.hashLock[i]);
+
+  if (!valid) {
+    console.warn("[HTLC] Preimage inválido — hash não corresponde ao hashLock");
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Reembolsa um HTLC após o timelock expirar.
+ * Apenas o remetente (refundPubKey) pode reembolsar.
+ *
+ * @param htlc - UTXO HTLC a ser reembolsado
+ * @param callerPubKey - Chave pública de quem está chamando
+ * @returns true se o reembolso é válido
+ */
+export function refundHTLC(htlc: HTLCUTXO, callerPubKey: Uint8Array): boolean {
+  if (htlc.spent) return false;
+
+  // Verifica se é o remetente
+  const isRefunder = callerPubKey.every((b, i) => b === htlc.refundPubKey[i]);
+  if (!isRefunder) {
+    console.warn("[HTLC] Apenas o remetente pode reembolsar");
+    return false;
+  }
+
+  // Verifica se o timelock expirou
+  if (Date.now() < htlc.timeLock) {
+    console.warn("[HTLC] Timelock ainda não expirou");
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Verifica se um HTLC pode ser reivindicado (preimage válido + não gasto).
+ */
+export function canClaimHTLC(htlc: HTLCUTXO): boolean {
+  return !htlc.spent;
+}
+
+/**
+ * Verifica se um HTLC pode ser reembolsado (timelock expirou + não gasto).
+ */
+export function canRefundHTLC(htlc: HTLCUTXO): boolean {
+  return !htlc.spent && Date.now() >= htlc.timeLock;
+}

@@ -22,3 +22,8 @@ bulletproofs = "4.0.0"
 merlin = "3.0.0"
 curve25519-dalek-ng = "4"
 blake3 = "1.5.0"
+
+# VØID-LN: Lightning Development Kit
+lightning = { version = "0.1", features = ["grind_signatures"] }
+lightning-invoice = { version = "0.33" }
+bitcoin = { version = "0.32", features = ["serde"] }

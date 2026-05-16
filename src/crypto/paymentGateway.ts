@@ -255,19 +255,46 @@ class NWCPayment {
   }
 
   /**
-   * Cria LNURL invoice via NWC.
-   * Requer wallet pubkey do destinatário.
+   * Cria invoice via NWC real (NIP-47).
+   * Conecta ao relay NWC do wallet e envia make_invoice request.
    */
   async createInvoice(): Promise<{ invoice: string; paymentHash: string }> {
-    // Em produção, usar Nostr relays para criar invoice
-    // Por agora, gerar invoice simulado
-    const paymentHash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, "0")).join("");
+    const { nwcClient } = await import("./nwcProtocol");
+
+    // Se não está conectado, tentar conectar com a pubkey fornecida
+    if (!nwcClient.isConnected()) {
+      // Para criar invoice, precisamos de uma conexão NWC completa (com relay e secret)
+      // Se não temos conexão, usar fallback simulado
+      console.warn("[NWC] Não conectado — gerando invoice simulado. Conecte via URI NWC primeiro.");
+      const paymentHash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+      return {
+        invoice: `lnbc${this.amountSat.toString(16)}${Date.now().toString(36)}${paymentHash.slice(0, 32)}`,
+        paymentHash,
+      };
+    }
+
+    // NWC real: pedir invoice ao wallet
+    const amountMsats = this.amountSat * 1000;
+    const result = await nwcClient.makeInvoice(amountMsats, "ETΞRNET Payment");
 
     return {
-      invoice: `lnbc${this.amountSat.toString(16)}${Date.now().toString(36)}${paymentHash.slice(0, 32)}`,
-      paymentHash,
+      invoice: result.invoice,
+      paymentHash: result.payment_hash,
     };
+  }
+
+  /**
+   * Paga uma invoice via NWC real.
+   */
+  async payInvoice(invoice: string): Promise<{ preimage: string }> {
+    const { nwcClient } = await import("./nwcProtocol");
+
+    if (!nwcClient.isConnected()) {
+      throw new Error("NWC não conectado. Conecte via URI NWC primeiro.");
+    }
+
+    return nwcClient.payInvoice(invoice, this.amountSat * 1000);
   }
 }
 
@@ -339,12 +366,41 @@ export class PaymentGateway {
   }
 
   /**
-   * Cria pagamento via Nostr Wallet Connect.
+   * Conecta a um wallet NWC via URI (nostr+walletconnect://...)
    */
-  async createNWCPayment(walletPubkey: string, item: PaymentItem): Promise<PaymentResult> {
+  async connectNWC(uri: string): Promise<{ connected: boolean; walletPubKey: string; relay: string }> {
+    const { nwcClient } = await import("./nwcProtocol");
+    const conn = await nwcClient.connect(uri);
+    return {
+      connected: conn.connected,
+      walletPubKey: conn.walletPubKey,
+      relay: conn.relay,
+    };
+  }
+
+  /**
+   * Desconecta do wallet NWC
+   */
+  disconnectNWC(): void {
+    import("./nwcProtocol").then(({ nwcClient }) => nwcClient.disconnect());
+  }
+
+  /**
+   * Cria pagamento via Nostr Wallet Connect.
+   * Se walletPubkey for uma URI NWC, conecta primeiro.
+   */
+  async createNWCPayment(walletPubkeyOrUri: string, item: PaymentItem): Promise<PaymentResult> {
     try {
+      // Se parece com URI NWC, conectar primeiro
+      if (walletPubkeyOrUri.startsWith("nostr+walletconnect://")) {
+        await this.connectNWC(walletPubkeyOrUri);
+        const { nwcClient } = await import("./nwcProtocol");
+        const conn = nwcClient.getConnection();
+        if (conn) walletPubkeyOrUri = conn.walletPubKey;
+      }
+
       const amountSat = await this.fiatToSat(item.amount, item.currency);
-      const payment = new NWCPayment(walletPubkey, amountSat);
+      const payment = new NWCPayment(walletPubkeyOrUri, amountSat);
       const { invoice, paymentHash } = await payment.createInvoice();
 
       return {

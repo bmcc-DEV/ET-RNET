@@ -1,3 +1,5 @@
+mod ldk;
+
 use wasm_bindgen::prelude::*;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;

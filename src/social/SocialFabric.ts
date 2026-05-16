@@ -217,10 +217,16 @@ export class SocialFabric {
             let ratchetState = this.ratchetStates.get(dm.senderPubKey);
             if (!ratchetState) {
               // Primeira mensagem do sender — inicializar como Bob
+              // Bob needs Alice's identity key for X3DH.
+              // In first message, Alice includes senderIdentityKey in the ratchet message.
+              // Fallback: use the sender's pubkey from the DM metadata.
+              const aliceIdKey = ratchetMsg.senderIdentityKey
+                || new Uint8Array(dm.senderPubKey.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+
               ratchetState = initializeRatchetAsBob(
-                ratchetMsg.dhPublicKey,
-                myId.publicKey,
-                myId.x25519SecretKey,
+                ratchetMsg.dhPublicKey,        // Alice's ephemeral key
+                aliceIdKey,                    // Alice's X25519 identity key
+                myId.x25519SecretKey,          // Bob's X25519 secret
                 { publicKey: myId.x25519PublicKey, secretKey: myId.x25519SecretKey },
               );
               this.ratchetStates.set(dm.senderPubKey, ratchetState);

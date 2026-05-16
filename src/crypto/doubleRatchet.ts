@@ -61,6 +61,7 @@ export interface RatchetState {
 /** Mensagem criptografada com header */
 export interface RatchetMessage {
   dhPublicKey: Uint8Array;       // Sender's current DH public key
+  senderIdentityKey: Uint8Array | undefined; // Sender's X25519 identity key (first message only, for X3DH)
   previousChainLength: number;   // PN
   messageNumber: number;         // N
   ciphertext: Uint8Array;        // nonce || encrypted || tag
@@ -209,23 +210,23 @@ export function initializeRatchetAsAlice(
  */
 export function initializeRatchetAsBob(
   aliceEphemeralKey: Uint8Array,
-  localIdentityKey: Uint8Array,
-  localSigningKey: Uint8Array,
-  localSPK: DHKeyPair,
-  localOPK?: DHKeyPair,
+  aliceIdentityKey: Uint8Array,   // Alice's X25519 public key (NOT Bob's)
+  bobSigningKey: Uint8Array,       // Bob's X25519 secret key
+  bobSPK: DHKeyPair,               // Bob's signed pre-key
+  bobOPK?: DHKeyPair,              // Bob's one-time pre-key
 ): RatchetState {
   // X3DH from Bob's side (mirrors Alice's computation):
   // DH1' = X25519(SPKb_priv, IKa_pub) — Bob's SPK, Alice's identity key
   // DH2' = X25519(IKb_priv, EKa_pub)  — Bob's identity, Alice's ephemeral
   // DH3' = X25519(SPKb_priv, EKa_pub) — Bob's SPK, Alice's ephemeral
   // By ECDH commutativity: X25519(a,B) = X25519(b,A), so DH1=DH1', DH2=DH2', DH3=DH3'
-  const dh1 = dh(localIdentityKey, localSPK);
-  const dh2 = dh(aliceEphemeralKey, { publicKey: localIdentityKey, secretKey: localSigningKey });
-  const dh3 = dh(aliceEphemeralKey, localSPK);
+  const dh1 = dh(aliceIdentityKey, bobSPK);
+  const dh2 = dh(aliceEphemeralKey, { publicKey: aliceIdentityKey, secretKey: bobSigningKey });
+  const dh3 = dh(aliceEphemeralKey, bobSPK);
 
   let x3dhOutput: Uint8Array;
-  if (localOPK) {
-    const dh4 = dh(aliceEphemeralKey, localOPK);
+  if (bobOPK) {
+    const dh4 = dh(aliceEphemeralKey, bobOPK);
     x3dhOutput = concatBuffers(dh1, dh2, dh3, dh4);
   } else {
     x3dhOutput = concatBuffers(dh1, dh2, dh3);
@@ -248,8 +249,8 @@ export function initializeRatchetAsBob(
     receiveMessageNumber: 0,
     previousSendingChainLength: 0,
     skippedKeys: new Map(),
-    localIdentityKey,
-    localSigningKey,
+    localIdentityKey: aliceIdentityKey,
+    localSigningKey: bobSigningKey,
   };
 }
 
@@ -287,6 +288,7 @@ export function ratchetEncrypt(
   // Step 5: Build header
   const header: RatchetMessage = {
     dhPublicKey: state.dhKeyPair.publicKey,
+    senderIdentityKey: state.sendMessageNumber === 0 ? state.localIdentityKey : undefined,
     previousChainLength: state.previousSendingChainLength,
     messageNumber: state.sendMessageNumber,
     ciphertext,
@@ -415,6 +417,7 @@ function skipMessageKeys(state: RatchetState, until: number): void {
 function serializeHeader(msg: RatchetMessage): Uint8Array {
   const parts: Uint8Array[] = [
     msg.dhPublicKey,
+    msg.senderIdentityKey || new Uint8Array(0),
     new Uint8Array([(msg.previousChainLength >> 8) & 0xff, msg.previousChainLength & 0xff]),
     new Uint8Array([(msg.messageNumber >> 8) & 0xff, msg.messageNumber & 0xff]),
     msg.ciphertext, // Full ciphertext for integrity (signature covers everything)
@@ -426,6 +429,7 @@ function serializeHeader(msg: RatchetMessage): Uint8Array {
 export function serializeMessage(msg: RatchetMessage): string {
   const parts = [
     btoa(String.fromCharCode(...msg.dhPublicKey)),
+    msg.senderIdentityKey ? btoa(String.fromCharCode(...msg.senderIdentityKey)) : "",
     String(msg.previousChainLength),
     String(msg.messageNumber),
     btoa(String.fromCharCode(...msg.ciphertext)),
@@ -437,14 +441,15 @@ export function serializeMessage(msg: RatchetMessage): string {
 /** Deserialize a RatchetMessage from transmission */
 export function deserializeMessage(data: string): RatchetMessage {
   const parts = data.split("|");
-  if (parts.length !== 5) throw new Error("Invalid ratchet message format");
+  if (parts.length !== 6) throw new Error("Invalid ratchet message format");
 
   return {
     dhPublicKey: Uint8Array.from(atob(parts[0]), c => c.charCodeAt(0)),
-    previousChainLength: parseInt(parts[1], 10),
-    messageNumber: parseInt(parts[2], 10),
-    ciphertext: Uint8Array.from(atob(parts[3]), c => c.charCodeAt(0)),
-    signature: Uint8Array.from(atob(parts[4]), c => c.charCodeAt(0)),
+    senderIdentityKey: parts[1] ? Uint8Array.from(atob(parts[1]), c => c.charCodeAt(0)) : undefined,
+    previousChainLength: parseInt(parts[2], 10),
+    messageNumber: parseInt(parts[3], 10),
+    ciphertext: Uint8Array.from(atob(parts[4]), c => c.charCodeAt(0)),
+    signature: Uint8Array.from(atob(parts[5]), c => c.charCodeAt(0)),
   };
 }
 

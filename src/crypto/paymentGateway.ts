@@ -193,32 +193,51 @@ class BitcoinPayment {
     return (this.amountSat / 100000000).toFixed(8);
   }
 
-  // Verificar pagamento via API pública (blockstream, mempool.space)
+  // Verificar pagamento via API pública (mempool.space)
   async checkPayment(): Promise<PaymentStatus> {
     try {
-      // Usar mempool.space API (gratuita, sem KYC)
-      const res = await fetch(`https://mempool.space/api/address/${this.address}`);
-      if (!res.ok) return { status: "pending" };
+      // Buscar dados do endereço + altura atual da blockchain em paralelo
+      const [addrRes, tipRes] = await Promise.all([
+        fetch(`https://mempool.space/api/address/${this.address}`),
+        fetch(`https://mempool.space/api/blocks/tip/height`),
+      ]);
 
-      const data = await res.json();
-      if (data.chain_stats.funded_txo_sum > 0) {
-        // mempool.space API: chain_stats.funded_txo_count > 0 means at least 1 on-chain tx
-        // For confirmations we need the tx block height vs current tip.
-        // Since we can't get the specific tx block from this endpoint,
-        // check if there are funded_txo_count in chain (confirmed) vs mempool (unconfirmed).
-        const chainTxs = data.chain_stats.funded_txo_count || 0;
-        const mempoolTxs = data.mempool_stats.funded_txo_count || 0;
+      if (!addrRes.ok) return { status: "pending" };
 
-        if (chainTxs > 0) {
-          // At least one confirmed transaction
-          this.confirmations = 6; // assume confirmed (conservative)
-          return { status: "confirmed", confirmations: this.confirmations };
-        } else if (mempoolTxs > 0) {
-          // In mempool but not yet confirmed
-          this.confirmations = 0;
-          return { status: "pending", confirmations: 0 };
+      const data = await addrRes.json();
+      const currentTip = tipRes.ok ? parseInt(await tipRes.text(), 10) : 0;
+
+      const chainTxs = data.chain_stats.funded_txo_count || 0;
+      const mempoolTxs = data.mempool_stats.funded_txo_count || 0;
+
+      if (chainTxs > 0) {
+        // Transação confirmada na chain
+        // Para confirmações reais: buscar a tx específica via
+        // /api/address/:address/txs e comparar tx.status.block_height com tip
+        // Como simplificação: se está na chain, calcular pelo funded_txo_sum
+        const txRes = await fetch(`https://mempool.space/api/address/${this.address}/txs`);
+        if (txRes.ok) {
+          const txs = await txRes.json();
+          if (txs.length > 0) {
+            const latestTx = txs[0];
+            if (latestTx.status?.confirmed && latestTx.status?.block_height) {
+              this.confirmations = currentTip - latestTx.status.block_height + 1;
+              return {
+                status: this.confirmations >= 3 ? "confirmed" : "pending",
+                confirmations: this.confirmations,
+              };
+            }
+          }
         }
+        // Fallback: confirmed but unknown depth
+        this.confirmations = 6;
+        return { status: "confirmed", confirmations: this.confirmations };
+      } else if (mempoolTxs > 0) {
+        // Na mempool mas não confirmada
+        this.confirmations = 0;
+        return { status: "pending", confirmations: 0 };
       }
+
       return { status: "pending" };
     } catch {
       return { status: "pending" };

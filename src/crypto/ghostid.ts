@@ -153,24 +153,24 @@ export async function spawnGhostId(
   // Collect biometric entropy
   const bioEntropy = await collectBiometricEntropy();
   
-  // Combine all entropy sources: quantum + biometric + hardware
-  const entropy = new Uint8Array(96); // 32 (quantum) + 64 (bio) = 96
+  // Combine all entropy sources: quantum (32) + bio (64+16+24+32=136) = 168
+  const entropy = new Uint8Array(168);
   let offset = 0;
-  
-  entropy.set(quantumEntropy, offset);
+
+  entropy.set(quantumEntropy, offset);       // 32 bytes
   offset += 32;
-  
-  entropy.set(new Uint8Array(bioEntropy.accelerometerPattern.buffer), offset);
+
+  entropy.set(new Uint8Array(bioEntropy.accelerometerPattern.buffer), offset); // 64 bytes
   offset += bioEntropy.accelerometerPattern.byteLength;
-  
-  entropy.set(bioEntropy.touchPressureMap.slice(0, 16), offset);
+
+  entropy.set(bioEntropy.touchPressureMap.slice(0, 16), offset); // 16 bytes
   offset += 16;
-  
-  entropy.set(bioEntropy.microphoneNoise.slice(0, 24), offset);
+
+  entropy.set(bioEntropy.microphoneNoise.slice(0, 24), offset); // 24 bytes
   offset += 24;
-  
-  // Fill remainder with keystroke timing
-  for (let i = 0; i < bioEntropy.keystrokeDynamics.length && offset < 96; i++) {
+
+  // Fill remainder with keystroke timing (up to 32 bytes)
+  for (let i = 0; i < bioEntropy.keystrokeDynamics.length && offset + 1 < 168; i++) {
     const ts = bioEntropy.keystrokeDynamics[i] || 0;
     entropy[offset] = ts & 0xff;
     entropy[offset + 1] = (ts >> 8) & 0xff;

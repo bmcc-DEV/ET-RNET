@@ -204,6 +204,30 @@ export function reconstituteMessage(shards: Shard[], sessionKey: Uint8Array): st
   return new TextDecoder().decode(reconstructed);
 }
 
+// ─── Security: zero-fill de material criptográfico sensível ──────────────────
+
+/**
+ * Apaga a chave de sessão e os dados plaintext dos shards da memória.
+ * Chamar imediatamente após o envio/recepção dos shards.
+ */
+export function destroyFragmentResult(result: FragmentResult): void {
+  result.sessionKey.fill(0);
+  for (const shard of result.shards) {
+    shard.data.fill(0);
+    shard.nonce.fill(0);
+    shard.tag.fill(0);
+  }
+}
+
+/**
+ * Apaga um Shard individual da memória.
+ */
+export function destroyShard(shard: Shard): void {
+  shard.data.fill(0);
+  shard.nonce.fill(0);
+  shard.tag.fill(0);
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 export function bytesToHex(bytes: Uint8Array): string {

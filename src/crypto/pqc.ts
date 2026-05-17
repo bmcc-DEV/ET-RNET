@@ -174,6 +174,25 @@ export function hybridDecrypt(
   return cipher.decrypt(ciphertextAndTag);
 }
 
+// ─── Security: zero-fill de material criptográfico sensível ──────────────────
+
+/**
+ * Apaga as chaves PQC da memória após uso.
+ * Essencial para chaves ML-KEM (3168 bytes de chave privada) e ML-DSA.
+ */
+export function destroyPQCKeyPair(kp: PQCKeyPair): void {
+  kp.privateKey.fill(0);
+  kp.publicKey.fill(0);
+}
+
+/**
+ * Apaga o segredo compartilhado encapsulado da memória.
+ */
+export function destroyEncapsulatedKey(ek: EncapsulatedKey): void {
+  ek.sharedSecret.fill(0);
+  ek.ciphertext.fill(0);
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 export function bytesToHex(bytes: Uint8Array): string {

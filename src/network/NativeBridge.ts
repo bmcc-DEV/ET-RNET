@@ -1,21 +1,37 @@
 /**
- * VØID·ΩMEGA — Native Hardware Bridge (Stratum 1/2)
+ * VØID — Native Hardware Bridge
  *
- * Esta ponte conecta a lógica TypeScript/WASM com os serviços nativos do
- * Sistema Operacional (Android/iOS via Capacitor/React Native).
- * 
- * Resolve o problema crítico: browsers matam conexões Web Bluetooth quando
- * o dispositivo é bloqueado. Este bridge transfere a responsabilidade do
- * "Human Carrier" para um Foreground Service (Android) ou Background Task (iOS),
- * garantindo sobrevivência.
+ * Conecta TypeScript/WASM com o OS nativo via Capacitor.
+ * Suporta dois modos:
+ *
+ * Modo A — Capacitor (Android/iOS):
+ *   Detectado via `window.Capacitor.isNativePlatform()`.
+ *   Usa `@capacitor/core` para comunicação com plugins nativos.
+ *   Plugin necessário no Android: VoidAnimusPlugin (Foreground Service + BLE adv).
+ *
+ * Modo B — Stub (browser puro):
+ *   Loga aviso, não quebra. Advertising fica a cargo do BluetoothDriver.
+ *
+ * Para criar o plugin Android:
+ *   npx @capacitor/cli plugin:generate
+ *   Implementar VoidAnimusPlugin.kt com startAnimusService() e updateBleAdvertisingData()
  */
 
 import { type HCNShard } from "../storage/hcnStore";
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 
+// Detecta Capacitor sem import estático (opcional — só instalado com o build nativo)
+function getCapacitor() {
+  return (window as any).Capacitor ?? null;
+}
+
+function getCapacitorPlugins() {
+  const cap = getCapacitor();
+  return cap?.Plugins ?? null;
+}
+
 export class NativeBridge {
   private static instance: NativeBridge;
-  private isNativeEnv = false;
 
   public static getInstance(): NativeBridge {
     if (!NativeBridge.instance) {
@@ -25,76 +41,84 @@ export class NativeBridge {
   }
 
   private constructor() {
-    this.checkEnvironment();
     this.listenToNativeEvents();
   }
 
-  private checkEnvironment() {
-    // Detecta se estamos rodando em uma WebView envolvida pelo shell nativo do VØID
-    this.isNativeEnv = !!(window as any).AndroidInterface || !!(window as any).webkit?.messageHandlers;
+  /**
+   * Verdadeiro quando rodando dentro do Capacitor (Android/iOS).
+   */
+  public isNative(): boolean {
+    return getCapacitor()?.isNativePlatform?.() === true;
   }
 
+  /** @deprecated Use isNative() */
   public isAvailable(): boolean {
-    return this.isNativeEnv;
+    return this.isNative();
   }
 
   /**
-   * Pede ao OS nativo para iniciar o serviço em background.
+   * Ativa o Foreground Service Android que mantém BLE vivo com tela apagada.
+   * Requer plugin VoidAnimusPlugin registrado no MainActivity.kt.
    */
-  public activateCarrierService() {
-    if (!this.isAvailable()) {
-      console.warn("[NATIVE BRIDGE] Ambiente não nativo. Serviço de carrier em background inativo.");
+  public async activateCarrierService(): Promise<void> {
+    if (!this.isNative()) {
+      console.warn("[NativeBridge] Não é ambiente Capacitor — Foreground Service indisponível.");
       return;
     }
 
-    console.log("[NATIVE BRIDGE] Solicitando Foreground Service ao OS...");
+    const plugins = getCapacitorPlugins();
     try {
-      if ((window as any).AndroidInterface) {
-        (window as any).AndroidInterface.startAnimusService();
+      if (plugins?.VoidAnimus) {
+        await plugins.VoidAnimus.startAnimusService();
+        console.log("[NativeBridge] Foreground Service ativado via Capacitor.");
+      } else {
+        console.warn("[NativeBridge] Plugin VoidAnimus não registrado. Instalar e sync.");
       }
-    } catch (e) {
-      console.error("[NATIVE BRIDGE] Falha ao ativar serviço nativo", e);
+    } catch (err) {
+      console.error("[NativeBridge] Falha ao ativar Foreground Service:", err);
     }
   }
 
   /**
-   * Envia shards locais para o cache nativo (Android).
-   * O rádio BLE transmitirá a partir de lá, sem acordar a WebView.
+   * Passa shards para o Android Foreground Service anunciar via BLE
+   * mesmo com a WebView suspensa (tela apagada).
    */
-  public pushShardsToNativeCache(shards: HCNShard[]) {
-    if (!this.isAvailable()) return;
+  public async pushShardsToNativeCache(shards: HCNShard[]): Promise<void> {
+    if (!this.isNative()) return;
+
+    const plugins = getCapacitorPlugins();
+    if (!plugins?.VoidAnimus) return;
 
     try {
-      const payload = JSON.stringify(shards.map(s => ({
-        id: s.commitment,
-        data: s.payload
-      })));
-      
-      if ((window as any).AndroidInterface) {
-        (window as any).AndroidInterface.updateBleAdvertisingData(payload);
-      }
-    } catch (e) {
-      console.error("[NATIVE BRIDGE] Falha ao injetar shards no cache nativo", e);
+      const payload = JSON.stringify(
+        shards.map(s => ({ id: s.commitment, data: s.payload })),
+      );
+      await plugins.VoidAnimus.updateBleAdvertisingData({ payload });
+    } catch (err) {
+      console.error("[NativeBridge] Falha ao injetar shards:", err);
     }
   }
 
   /**
-   * Escuta quando o serviço Android BLE background encontrar outro nó.
+   * Escuta eventos do plugin nativo (peer BLE descoberto, shard recebido).
    */
-  private listenToNativeEvents() {
-    window.addEventListener("NATIVE_BLE_PEER", (e: any) => {
-      const { address, rssi } = e.detail;
-      console.log(`[NATIVE BRIDGE] Peer descoberto pelo Android Service: ${address} (${rssi}dBm)`);
-      
-      // Notifica o orquestrador para registrar a conexão na malha lógica
+  private listenToNativeEvents(): void {
+    window.addEventListener("NATIVE_BLE_PEER", (e: Event) => {
+      const { address, rssi } = (e as CustomEvent).detail ?? {};
+      console.log(`[NativeBridge] Peer BLE descoberto: ${address} (${rssi}dBm)`);
       voidOrchestrator.handleIncomingShard({}, `NATIVE_BLE:${address}`);
     });
 
-    window.addEventListener("NATIVE_SHARD_RECEIVED", (e: any) => {
-      const { shard } = e.detail;
-      console.log(`[NATIVE BRIDGE] Shard recebido enquanto a tela estava apagada!`);
-      // Roteia de volta para o ecossistema principal
+    window.addEventListener("NATIVE_SHARD_RECEIVED", (e: Event) => {
+      const { shard } = (e as CustomEvent).detail ?? {};
+      console.log("[NativeBridge] Shard recebido em background.");
       voidOrchestrator.handleIncomingShard(shard, "NATIVE_BACKGROUND");
+    });
+
+    // Capacitor plugin events (alternativa aos DOM events acima)
+    const plugins = getCapacitorPlugins();
+    plugins?.VoidAnimus?.addListener?.("blePeerDiscovered", (data: { address: string; rssi: number }) => {
+      voidOrchestrator.handleIncomingShard({}, `NATIVE_BLE:${data.address}`);
     });
   }
 }

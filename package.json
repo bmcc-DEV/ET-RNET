@@ -15,7 +15,9 @@
     "test:coverage": "vitest run --coverage",
     "anchor:deploy": "hardhat run scripts/deploy-anchor.ts --network sepolia",
     "anchor:deploy:local": "hardhat run scripts/deploy-anchor.ts --network localhost",
-    "anchor:test": "hardhat test test/contracts/ETRNETAnchor.test.ts"
+    "anchor:test": "hardhat test test/contracts/ETRNETAnchor.test.ts",
+    "build:wasm": "cd void_core && wasm-pack build --target web --out-dir pkg",
+    "build:wasm:dev": "cd void_core && wasm-pack build --target web --out-dir pkg --dev"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.3",

@@ -73,17 +73,70 @@ export class BluetoothDriver {
   }
 
   /**
-   * Transmite (Broadcasting) um Shard via GATT Server.
-   * Cria um serviço BLE local expondo a característica de Shard.
+   * Transmite (Advertising/Peripheral) um Shard via BLE.
+   *
+   * Caminho 1 — Capacitor nativo (Android/iOS):
+   *   Usa o plugin @capacitor-community/bluetooth-le em modo periférico.
+   *   Requer: npx cap sync android + plugin instalado no MainActivity.
+   *
+   * Caminho 2 — Chrome Bluetooth GATT Server (experimental):
+   *   Disponível apenas no Chrome Dev com flag #enable-experimental-web-platform-features.
+   *
+   * Caminho 3 — Stub (todos os outros ambientes):
+   *   Regista no log e retorna. O NativeBridge delega ao Android Foreground Service.
    */
   public async startAdvertising(shardData: Uint8Array): Promise<void> {
-    if (!this.isSupported()) throw new Error("Web Bluetooth GATT Server não suportado.");
+    // Caminho 1: Capacitor nativo
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) {
+      try {
+        const { BleClient } = await import(
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore — plugin opcional: npm i @capacitor-community/bluetooth-le
+          "@capacitor-community/bluetooth-le"
+        );
+        await BleClient.initialize({ androidNeverForLocation: true });
+        // Modo periférico: anunciar serviço VOID com os dados do shard
+        await (BleClient as any).startAdvertising?.({
+          services: [VOID_BLE_SERVICE_UUID],
+          localName: "VOID-NODE",
+          manufacturerData: Array.from(shardData.slice(0, 26)), // max 26 bytes no payload BLE
+        });
+        console.log(`[BLE Adv] Capacitor: advertising iniciado (${shardData.length} bytes)`);
+        return;
+      } catch (err) {
+        console.warn("[BLE Adv] Capacitor plugin indisponível — tentando Web API:", err);
+      }
+    }
 
-    // NOTA: O suporte a GATT Server Host (advertising) em browsers ainda está
-    // em fase experimental no Chrome Dev. Em browsers normais, simulamos
-    // o socket de escuta.
-    console.log(`[BLE Adv] Registrando GATT Service ${VOID_BLE_SERVICE_UUID}`);
-    console.log(`[BLE Adv] Expondo Característica ${VOID_BLE_SHARD_CHAR_UUID} com ${shardData.length} bytes`);
+    // Caminho 2: Chrome GATT Server experimental
+    const bluetooth = (navigator as any).bluetooth;
+    if (bluetooth && typeof bluetooth.requestLEScan === "function") {
+      try {
+        // Web Bluetooth GATT Server (flag experimental no Chrome Dev)
+        const server = await bluetooth.requestGATTServer?.();
+        if (server) {
+          const service = await server.addService(VOID_BLE_SERVICE_UUID);
+          const char = await service.addCharacteristic(VOID_BLE_SHARD_CHAR_UUID, {
+            properties: ["read", "notify"],
+            value: shardData,
+          });
+          await char.startNotifications();
+          this.activeServer = server;
+          console.log(`[BLE Adv] GATT Server experimental: OK (${shardData.length} bytes)`);
+          return;
+        }
+      } catch (err) {
+        console.warn("[BLE Adv] GATT Server experimental falhou:", err);
+      }
+    }
+
+    // Caminho 3: Stub — NativeBridge assume o advertising via Foreground Service
+    console.log(
+      `[BLE Adv] Ambiente sem suporte nativo. ` +
+      `Delegar ao NativeBridge (Android Foreground Service) ou instalar ` +
+      `@capacitor-community/bluetooth-le. Shard size: ${shardData.length} bytes`,
+    );
   }
 
   /**

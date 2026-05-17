@@ -60,19 +60,62 @@ export class LoRaDriver {
   }
 
   /**
-   * Envia comando AT direto e aguarda resposta.
+   * Envia comando AT e lê a resposta do rádio com timeout.
+   * O rádio Reyax responde em até ~300ms após receber o comando.
    */
-  public async sendATCommand(cmd: string): Promise<string> {
-    if (!this.port || !this.port.writable) throw new Error("Porta serial LoRa inativa.");
+  public async sendATCommand(cmd: string, timeoutMs = 500): Promise<string> {
+    if (!this.port || !this.port.writable || !this.port.readable) {
+      throw new Error("Porta serial LoRa inativa.");
+    }
 
     const encoder = new TextEncoder();
-    const writer = this.port.writable.getWriter();
     const fullCmd = `${cmd}\r\n`;
 
+    // Escrever comando
+    const writer = this.port.writable.getWriter();
     await writer.write(encoder.encode(fullCmd));
     writer.releaseLock();
     console.log(`[LoRa TX] Comando AT enviado: ${cmd}`);
-    return "OK"; // Retorno simbólico da escrita bem sucedida
+
+    // Ler resposta com timeout
+    const reader = this.port.readable.getReader();
+    const decoder = new TextDecoder();
+    let response = "";
+    const deadline = Date.now() + timeoutMs;
+
+    try {
+      while (Date.now() < deadline) {
+        const remaining = deadline - Date.now();
+        const timeoutPromise = new Promise<{ value: undefined; done: true }>(
+          (_, reject) => setTimeout(() => reject(new Error("timeout")), remaining),
+        );
+        const { value, done } = await Promise.race([
+          reader.read() as Promise<{ value: Uint8Array; done: false }>,
+          timeoutPromise,
+        ]);
+        if (done) break;
+        response += decoder.decode(value, { stream: true });
+        // Resposta AT termina com \r\n — linha completa recebida
+        if (response.includes("\n")) break;
+      }
+    } catch (err: unknown) {
+      if (!(err instanceof Error && err.message === "timeout")) throw err;
+    } finally {
+      reader.releaseLock();
+    }
+
+    const trimmed = response.trim();
+    if (!trimmed) {
+      console.warn(`[LoRa AT] Sem resposta para "${cmd}" em ${timeoutMs}ms`);
+      return "TIMEOUT";
+    }
+
+    if (trimmed.startsWith("ERR")) {
+      throw new Error(`[LoRa AT] Erro do rádio: ${trimmed}`);
+    }
+
+    console.log(`[LoRa AT] Resposta: ${trimmed}`);
+    return trimmed;
   }
 
   /**

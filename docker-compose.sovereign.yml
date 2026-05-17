@@ -2,9 +2,10 @@
 # ET-RNET — Stack Soberana de Produção
 #
 # Inclui:
-#   - bitcoind       lncm/bitcoind:v28.0            (nó Bitcoin)
-#   - lnd            lightninglabs/lnd:v0.18.3-beta (Lightning Daemon)
+#   - bitcoind       lncm/bitcoind:v27.2            (nó Bitcoin)
+#   - lnd            lightninglabs/lnd:v0.18.2-beta (Lightning Daemon)
 #   - rtl            shahanafarooqui/rtl:v0.15.8    (UI + NWC bridge)
+#   - nostr-relay    scsibug/nostr-rs-relay          (relay NOSTR próprio)
 #   - etrnet-server  node:22-alpine                 (servidor ET-RNET)
 #
 # PRIMEIRO USO (passo a passo):
@@ -41,6 +42,7 @@ volumes:
   bitcoin_data:
   lnd_data:
   rtl_data:
+  nostr_data:
 
 networks:
   void_net:
@@ -201,3 +203,27 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # ── NOSTR Relay Próprio (nostr-rs-relay) ─────────────────────────────────────
+  # Relay NOSTR soberano usando nostr-rs-relay (Rust, alta performance).
+  # Suporta os kinds 31214-31219 usados pelo protocolo ETRNET.
+  # Subir: docker compose -f docker-compose.sovereign.yml up -d nostr-relay
+  # Conectar: ws://localhost:7777
+  nostr-relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: nostr-relay
+    restart: unless-stopped
+    networks:
+      void_net:
+        ipv4_address: 172.20.0.6
+    ports:
+      - "7777:8080"   # WebSocket relay
+    volumes:
+      - nostr_data:/usr/src/app/db
+      - ./config/nostr.toml:/usr/src/app/config.toml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -143,8 +143,8 @@ export class PhantomShopper {
       itemPrice, currency, "BRL"
     );
 
-    // 3. Processa pagamento via Payment Request API ou Stripe
-    const paymentResult: PaymentResult = await paymentGateway.pay({
+    // 3. Processa pagamento via NWC
+    const paymentResult: PaymentResult = await paymentGateway.createPayment({
       label: `${marketplaceName} — ${itemDescription}`,
       amount: convertedAmount.toFixed(2),
       currency: convertedCurrency,

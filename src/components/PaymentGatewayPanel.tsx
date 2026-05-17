@@ -1,11 +1,15 @@
-import { useRef, useState } from "react";
-import { paymentGateway, type PaymentItem, type PaymentResult } from "../crypto/paymentGateway";
+import { useEffect, useRef, useState } from "react";
+import { paymentGateway, type PaymentResult } from "../crypto/paymentGateway";
 
 export default function PaymentGatewayPanel() {
+  const [nwcUri, setNwcUri] = useState("");
+  const [connected, setConnected] = useState(false);
+  const [balanceSat, setBalanceSat] = useState<number | null>(null);
   const [amount, setAmount] = useState("49.90");
   const [currency, setCurrency] = useState("BRL");
   const [label, setLabel] = useState("ETRNET Premium");
   const [result, setResult] = useState<PaymentResult | null>(null);
+  const [prices, setPrices] = useState<{ brl: number; usd: number; eur: number } | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const logRef = useRef<string[]>([]);
 
@@ -14,31 +18,56 @@ export default function PaymentGatewayPanel() {
     setLogs([...logRef.current]);
   };
 
-  const makeItem = (): PaymentItem => ({ label, amount, currency });
+  // Carregar preços ao vivo
+  useEffect(() => {
+    paymentGateway.getBtcPrices().then(setPrices).catch(() => {});
+    const interval = setInterval(() => {
+      paymentGateway.getBtcPrices().then(setPrices).catch(() => {});
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleLightning = async () => {
-    const r = await paymentGateway.createLightningPayment(makeItem());
-    setResult(r);
-    addLog(r.success ? `Lightning: ${r.amountSat} sat, invoice gerada` : `ERRO: ${r.error}`);
+  // Verificar conexão NWC
+  useEffect(() => {
+    paymentGateway.isNWCConnected().then(setConnected);
+  }, []);
+
+  const handleConnect = async () => {
+    if (!nwcUri.startsWith("nostr+walletconnect://")) {
+      addLog("ERRO: URI inválido. Deve começar com nostr+walletconnect://");
+      return;
+    }
+    try {
+      const info = await paymentGateway.connectNWC(nwcUri);
+      setConnected(info.connected);
+      if (info.balanceSat !== undefined) {
+        setBalanceSat(info.balanceSat);
+      }
+      addLog(`NWC conectado: ${info.walletPubKey.slice(0, 16)}... via ${info.relay.slice(0, 40)}`);
+    } catch (err: any) {
+      addLog(`ERRO ao conectar: ${err.message}`);
+    }
   };
 
-  const handleBitcoin = async () => {
-    const r = await paymentGateway.createBitcoinPayment(makeItem());
-    setResult(r);
-    addLog(r.success ? `Bitcoin: ${r.amountSat} sat, endereco gerado` : `ERRO: ${r.error}`);
+  const handleDisconnect = async () => {
+    await paymentGateway.disconnectNWC();
+    setConnected(false);
+    setBalanceSat(null);
+    addLog("NWC desconectado");
   };
 
-  const handleNWC = async () => {
-    const fakePk = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, "0")).join("");
-    const r = await paymentGateway.createNWCPayment(fakePk, makeItem());
-    setResult(r);
-    addLog(r.success ? `NWC: ${r.amountSat} sat, invoice via Nostr` : `ERRO: ${r.error}`);
+  const handleRefreshBalance = async () => {
+    const info = await paymentGateway.getWalletInfo();
+    if (info?.balanceSat !== undefined) {
+      setBalanceSat(info.balanceSat);
+      addLog(`Saldo: ${info.balanceSat.toLocaleString()} sats`);
+    }
   };
 
-  const handleAutoPay = async () => {
-    const r = await paymentGateway.pay(makeItem());
+  const handleCreatePayment = async () => {
+    const r = await paymentGateway.createPayment({ label, amount, currency });
     setResult(r);
-    addLog(`Auto-pay (${r.method}): ${r.success ? "OK" : r.error}`);
+    addLog(r.success ? `Invoice criada: ${r.amountSat} sats` : `ERRO: ${r.error}`);
   };
 
   return (
@@ -54,20 +83,68 @@ export default function PaymentGatewayPanel() {
             Gateway de <span className="text-[#ffd700]">Pagamento</span>
           </h2>
           <p className="text-zinc-400 text-base md:text-lg leading-relaxed max-w-2xl">
-            Bitcoin on-chain + Lightning Network + Nostr Wallet Connect (NWC).
-            Sem KYC, sem conta, sem terceiro. Converte fiat para satoshis automaticamente.
+            Nostr Wallet Connect (NWC) — payments reais via Lightning.
+            Sem KYC, sem conta, sem terceiro. Preços ao vivo.
           </p>
         </div>
 
         <div className="grid lg:grid-cols-12 gap-px bg-[#14181c] border border-[#14181c]">
           <div className="lg:col-span-7 bg-[#0a0d10] p-6 md:p-8">
+            {/* NWC Connection */}
+            <div className="mb-6">
+              <span className="tag mb-3 block">NWC WALLET CONNECT</span>
+              <div className="flex gap-2 mb-3">
+                <input
+                  value={nwcUri}
+                  onChange={(e) => setNwcUri(e.target.value)}
+                  placeholder="nostr+walletconnect://..."
+                  className="flex-1 bg-black border border-[#14181c] px-3 py-2 text-[10px] font-mono text-zinc-300 focus:outline-none focus:border-[#ffd700]/50"
+                />
+                {connected ? (
+                  <button
+                    onClick={handleDisconnect}
+                    className="px-4 py-2 border border-red-500/30 text-red-400 font-mono text-[10px] hover:bg-red-500/10 transition-all"
+                  >
+                    DESCONECTAR
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleConnect}
+                    className="px-4 py-2 bg-[#ffd700] text-black font-mono text-[10px] hover:bg-white transition-all"
+                  >
+                    CONECTAR
+                  </button>
+                )}
+              </div>
+              {connected && balanceSat !== null && (
+                <div className="flex items-center justify-between p-3 bg-black border border-[#14181c] font-mono text-[10px]">
+                  <div>
+                    <span className="text-zinc-600">saldo: </span>
+                    <span className="text-[#b6ff3a]">{balanceSat.toLocaleString()} sats</span>
+                  </div>
+                  <button
+                    onClick={handleRefreshBalance}
+                    className="text-[#6cf0ff] hover:text-white transition-all text-[9px]"
+                  >
+                    [refresh]
+                  </button>
+                </div>
+              )}
+              {!connected && (
+                <div className="p-3 bg-black border border-red-500/20 font-mono text-[10px] text-red-400">
+                  Nenhuma wallet conectada. Cole uma URI NWC acima.
+                </div>
+              )}
+            </div>
+
+            {/* Create Payment */}
             <div className="flex items-center justify-between mb-4">
               <span className="tag">CRIAR PAGAMENTO</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2 mb-4">
               <div>
-                <span className="font-mono text-[9px] text-zinc-600 mb-1 block">VALOR</span>
+                <span className="font-mono text-[9px] text-zinc-600 mb-1 block">VALOR ({currency})</span>
                 <input
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -97,42 +174,23 @@ export default function PaymentGatewayPanel() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              <button
-                onClick={handleLightning}
-                className="py-3 bg-[#ffd700] text-black font-mono text-[10px] tracking-[0.2em] hover:bg-white transition-all"
-              >
-                LIGHTNING
-              </button>
-              <button
-                onClick={handleBitcoin}
-                className="py-3 border border-[#ffd700]/30 text-[#ffd700] font-mono text-[10px] tracking-[0.2em] hover:bg-[#ffd700]/10 transition-all"
-              >
-                BITCOIN ON-CHAIN
-              </button>
-              <button
-                onClick={handleNWC}
-                className="py-3 border border-[#6cf0ff]/30 text-[#6cf0ff] font-mono text-[10px] tracking-[0.2em] hover:bg-[#6cf0ff]/10 transition-all"
-              >
-                NOSTR WALLET (NWC)
-              </button>
-              <button
-                onClick={handleAutoPay}
-                className="py-3 border border-[#b6ff3a]/30 text-[#b6ff3a] font-mono text-[10px] tracking-[0.2em] hover:bg-[#b6ff3a]/10 transition-all"
-              >
-                AUTO-PAY
-              </button>
-            </div>
+            <button
+              onClick={handleCreatePayment}
+              disabled={!connected}
+              className={`w-full py-3 font-mono text-[10px] tracking-[0.2em] transition-all ${
+                connected
+                  ? "bg-[#ffd700] text-black hover:bg-white"
+                  : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+              }`}
+            >
+              {connected ? "CRIAR INVOICE VIA NWC" : "CONECTE UMA WALLET PRIMEIRO"}
+            </button>
 
             {result && (
-              <div className={`p-4 border font-mono text-[10px] space-y-1 ${
+              <div className={`mt-4 p-4 border font-mono text-[10px] space-y-1 ${
                 result.success ? "bg-black border-[#ffd700]/20" : "bg-black border-red-500/20"
               }`}>
                 <div className="tag mb-2">{result.success ? "PAGAMENTO CRIADO" : "ERRO"}</div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-600">metodo</span>
-                  <span className="text-[#ffd700]">{result.method}</span>
-                </div>
                 {result.amountSat && (
                   <div className="flex justify-between">
                     <span className="text-zinc-600">sats</span>
@@ -142,11 +200,6 @@ export default function PaymentGatewayPanel() {
                 {result.invoice && (
                   <div className="pt-1 border-t border-[#14181c] text-[8px] text-zinc-500 break-all">
                     invoice: {result.invoice.slice(0, 48)}...
-                  </div>
-                )}
-                {result.address && (
-                  <div className="pt-1 border-t border-[#14181c] text-[8px] text-zinc-500 break-all">
-                    addr: {result.address}
                   </div>
                 )}
                 {result.paymentHash && (
@@ -162,21 +215,20 @@ export default function PaymentGatewayPanel() {
           <div className="lg:col-span-5 bg-black p-6 md:p-8 flex flex-col justify-between">
             <div className="space-y-6">
               <div>
-                <span className="tag mb-3 block">METODOS DISPONIVEIS</span>
-                <div className="space-y-2">
-                  {[
-                    { name: "Lightning Network", desc: "Instantaneo, taxas minimas", color: "#ffd700" },
-                    { name: "Bitcoin On-Chain", desc: "~30min, 3 confirmacoes", color: "#ffd700" },
-                    { name: "Nostr Wallet Connect", desc: "Descentralizado via NOSTR", color: "#6cf0ff" },
-                  ].map((m, i) => (
-                    <div key={i} className="p-3 bg-[#0a0d10] border border-[#14181c] font-mono text-[10px]">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="w-2 h-2" style={{ backgroundColor: m.color }} />
-                        <span className="text-zinc-300">{m.name}</span>
-                      </div>
-                      <div className="text-zinc-600 text-[8px] pl-4">{m.desc}</div>
-                    </div>
-                  ))}
+                <span className="tag mb-3 block">COMO FUNCIONA</span>
+                <div className="space-y-2 font-mono text-[10px]">
+                  <div className="p-3 bg-[#0a0d10] border border-[#14181c]">
+                    <div className="text-zinc-300 mb-1">1. Cole sua NWC URI</div>
+                    <div className="text-zinc-600 text-[8px]">Alby, Blixt, Umbrel, LNbits</div>
+                  </div>
+                  <div className="p-3 bg-[#0a0d10] border border-[#14181c]">
+                    <div className="text-zinc-300 mb-1">2. Defina o valor</div>
+                    <div className="text-zinc-600 text-[8px]">Fiat → sats (preço ao vivo)</div>
+                  </div>
+                  <div className="p-3 bg-[#0a0d10] border border-[#14181c]">
+                    <div className="text-zinc-300 mb-1">3. Crie a invoice</div>
+                    <div className="text-zinc-600 text-[8px]">NWC envia ao seu wallet via NOSTR</div>
+                  </div>
                 </div>
               </div>
 
@@ -189,10 +241,22 @@ export default function PaymentGatewayPanel() {
                   <span className="text-zinc-600">custodia</span>
                   <span className="text-[#b6ff3a]">ZERO</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-600">preco BTC/BRL</span>
-                  <span className="text-zinc-300">R$350.000</span>
-                </div>
+                {prices && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600">BTC/BRL</span>
+                      <span className="text-zinc-300">R${prices.brl.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600">BTC/USD</span>
+                      <span className="text-zinc-300">${prices.usd.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600">BTC/EUR</span>
+                      <span className="text-zinc-300">€{prices.eur.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

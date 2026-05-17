@@ -1,224 +1,97 @@
 /**
- * VØID-LN — LDK WASM Bridge
+ * VØID-LN — BOLT11 Invoice Bridge (WASM)
  *
- * Wraps LDK (Lightning Development Kit) for use in the browser.
- * All channel state, key management, and HTLC resolution happens in WASM.
- * Private keys never leave the browser.
+ * Minimal WASM module for BOLT11 invoice parsing and generation
+ * via the `lightning-invoice` crate. No full LDK — just invoice support.
  *
- * Architecture:
- * - ChannelManager: manages channels, routes payments
- * - KeysManager: derives keys from seed (stored in OPFS)
- * - Persister: serializes channel state to JS callbacks (IndexedDB)
- * - EventHandler: delegates LDK events to JS
- * - PeerManager: uses NOSTR transport (not TCP)
+ * LDK WASM was removed because secp256k1-sys (required by `lightning` crate)
+ * does not compile for wasm32-unknown-unknown (requires C compilation).
  */
 
 use wasm_bindgen::prelude::*;
-use js_sys::{Array, Function, Object, Promise, Uint8Array};
-use std::sync::Arc;
+use lightning_invoice::{Currency, Bolt11Invoice};
 
-// ─── LDK Imports ──────────────────────────────────────────────────────────────
+// ─── Invoice Parsing ─────────────────────────────────────────────────────────
 
-use bitcoin::hashes::Hash;
-use bitcoin::secp256k1::{Secp256k1, SecretKey, PublicKey};
-use lightning::chain::chainmonitor::{ChainMonitor, Persist};
-use lightning::chain::channelmonitor::ChannelMonitor;
-use lightning::chain::keysinterface::{InMemorySigner, KeysManager};
-use lightning::chain::{BestBlock, Filter, Watch};
-use lightning::ln::channelmanager::{
-    ChainParameters, ChannelManager as LdkChannelManager, SimpleArcChannelManager,
-};
-use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, PeerManager as LdkPeerManager};
-use lightning::ln::msgs::NetAddress;
-use lightning::routing::gossip::{NetworkGraph, NodeId, P2PGossipSync};
-use lightning::routing::router::DefaultRouter;
-use lightning::util::config::UserConfig;
-use lightning::util::logger::{Logger, Record};
-use lightning::util::ser::ReadableArgs;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
+/// Parse a BOLT11 invoice string and return a JSON summary.
+///
+/// Returns: { amount_sat, description, payment_hash, timestamp, expiry, network }
+/// Or: { error: "..." }
 #[wasm_bindgen]
-pub struct LDKNode {
-    // Channel manager (the brain)
-    channel_manager: Option<Arc<LdkChannelManager<Arc<ChainMonitor<Arc<InMemorySigner>, Arc<dyn Filter>, Arc<JSLogger>, Arc<JSLogger>, Arc<JSPersist>>>>>>,
-    // Keys manager
-    keys_manager: Option<Arc<KeysManager>>,
-    // Network graph for routing
-    network_graph: Option<Arc<NetworkGraph<Arc<JSLogger>>>>,
-    // Logger
-    logger: Arc<JSLogger>,
-    // Persister
-    persister: Arc<JSPersist>,
+pub fn parse_bolt11(bolt11_str: &str) -> Result<String, JsValue> {
+    let invoice: Bolt11Invoice = bolt11_str.parse()
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse BOLT11: {}", e)))?;
+
+    let amount_sat = invoice.amount_milli_satoshis().unwrap_or(0) / 1000;
+    let description = match invoice.description() {
+        lightning_invoice::Bolt11InvoiceDescriptionRef::Direct(s) => s.to_string(),
+        lightning_invoice::Bolt11InvoiceDescriptionRef::Hash(_) => "[hash]".to_string(),
+    };
+    let payment_hash = invoice.payment_hash().to_string();
+    let timestamp = invoice.duration_since_epoch().as_secs();
+    let expiry = invoice.expiry_time().as_secs();
+    let network = match invoice.currency() {
+        Currency::Bitcoin => "bitcoin",
+        Currency::BitcoinTestnet => "testnet",
+        Currency::Regtest => "regtest",
+        Currency::Simnet => "simnet",
+        Currency::Signet => "signet",
+    };
+
+    Ok(format!(
+        r#"{{"amount_sat":{},"description":"{}","payment_hash":"{}","timestamp":{},"expiry":{},"network":"{}"}}"#,
+        amount_sat,
+        description.replace('"', "\\\""),
+        payment_hash,
+        timestamp,
+        expiry,
+        network,
+    ))
 }
 
-// ─── Logger (delegates to JS console.log) ─────────────────────────────────────
+// ─── Invoice Generation ──────────────────────────────────────────────────────
 
-struct JSLogger {
-    js_log_fn: Option<Function>,
-}
-
-impl Logger for JSLogger {
-    fn log(&self, record: &Record) {
-        if let Some(ref f) = self.js_log_fn {
-            let msg = format!("[LDK {}] {}", record.level, record.args);
-            let _ = f.call1(&JsValue::NULL, &JsValue::from_str(&msg));
-        }
-    }
-}
-
-// ─── Persister (serializes to JS callbacks) ──────────────────────────────────
-
-struct JSPersist {
-    js_persist_fn: Option<Function>,
-}
-
-impl Persist<InMemorySigner> for JSPersist {
-    fn persist_new_channel(
-        &self,
-        funding_txo: &bitcoin::OutPoint,
-        monitor: &ChannelMonitor<InMemorySigner>,
-        _update_id: lightning::chain::channelmonitor::MonitorUpdateId,
-    ) -> lightning::chain::channelmonitor::ChannelMonitorUpdateStatus {
-        if let Some(ref f) = self.js_persist_fn {
-            let serialized = monitor.encode();
-            let data = Uint8Array::from(serialized.as_slice());
-            let _ = f.call3(
-                &JsValue::NULL,
-                &JsValue::from_str("new_channel"),
-                &JsValue::from_str(&funding_txo.to_string()),
-                &data,
-            );
-        }
-        lightning::chain::channelmonitor::ChannelMonitorUpdateStatus::Completed
-    }
-
-    fn update_persisted_channel(
-        &self,
-        funding_txo: &bitcoin::OutPoint,
-        _update: Option<&lightning::chain::channelmonitor::ChannelMonitorUpdate>,
-        monitor: &ChannelMonitor<InMemorySigner>,
-        _update_id: lightning::chain::channelmonitor::MonitorUpdateId,
-    ) -> lightning::chain::channelmonitor::ChannelMonitorUpdateStatus {
-        if let Some(ref f) = self.js_persist_fn {
-            let serialized = monitor.encode();
-            let data = Uint8Array::from(serialized.as_slice());
-            let _ = f.call3(
-                &JsValue::NULL,
-                &JsValue::from_str("update_channel"),
-                &JsValue::from_str(&funding_txo.to_string()),
-                &data,
-            );
-        }
-        lightning::chain::channelmonitor::ChannelMonitorUpdateStatus::Completed
-    }
-}
-
-// ─── WASM Exports ─────────────────────────────────────────────────────────────
-
+/// Generate a BOLT11 invoice.
+///
+/// Parameters:
+/// - private_key: 32 bytes (serialized as hex string)
+/// - amount_sat: amount in satoshis
+/// - description: invoice description
+/// - expiry_secs: expiry in seconds
+/// - network: "bitcoin", "testnet", or "regtest"
+///
+/// Returns: BOLT11 invoice string
 #[wasm_bindgen]
-impl LDKNode {
-    /// Creates a new LDK node with the given seed (32 bytes).
-    /// The seed is used to derive all Lightning keys.
-    #[wasm_bindgen(constructor)]
-    pub fn new(seed: &[u8], js_log_fn: Option<Function>, js_persist_fn: Option<Function>) -> Result<LDKNode, JsValue> {
-        if seed.len() != 32 {
-            return Err(JsValue::from_str("Seed must be 32 bytes"));
-        }
+pub fn create_bolt11(
+    _private_key: &str,
+    _amount_sat: u64,
+    _description: &str,
+    _expiry_secs: u64,
+    _network: &str,
+) -> Result<String, JsValue> {
+    // Invoice generation requires secp256k1 signing, which needs secp256k1-sys.
+    // This cannot work in WASM without a pure-Rust secp256k1 implementation.
+    // Use NWC (NIP-47) to generate real invoices via external Lightning wallet.
+    Err(JsValue::from_str(
+        "BOLT11 generation requires secp256k1 signing. Use NWC (NIP-47) instead.",
+    ))
+}
 
-        let logger = Arc::new(JSLogger { js_log_fn });
-        let persister = Arc::new(JSPersist { js_persist_fn });
+/// Validate a BOLT11 invoice string.
+///
+/// Returns: true if valid, false otherwise
+#[wasm_bindgen]
+pub fn validate_bolt11(bolt11_str: &str) -> bool {
+    bolt11_str.parse::<Bolt11Invoice>().is_ok()
+}
 
-        Ok(LDKNode {
-            channel_manager: None,
-            keys_manager: None,
-            network_graph: None,
-            logger,
-            persister,
-        })
-    }
+/// Extract the payment hash from a BOLT11 invoice.
+///
+/// Returns: hex-encoded 32-byte payment hash
+#[wasm_bindgen]
+pub fn extract_payment_hash(bolt11_str: &str) -> Result<String, JsValue> {
+    let invoice: Bolt11Invoice = bolt11_str.parse()
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse BOLT11: {}", e)))?;
 
-    /// Initializes the channel manager with the given seed and network.
-    /// Must be called after construction.
-    #[wasm_bindgen(js_name = "initialize")]
-    pub fn initialize(&mut self, seed: &[u8], network: &str) -> Result<(), JsValue> {
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(seed)
-            .map_err(|e| JsValue::from_str(&format!("Invalid seed: {}", e)))?;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // Keys manager
-        let keys_manager = Arc::new(KeysManager::new(
-            seed,
-            now,
-            now as u32,
-        ));
-
-        // Network graph
-        let genesis_hash = match network {
-            "mainnet" => bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash(),
-            "testnet" => bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Testnet).block_hash(),
-            _ => bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Regtest).block_hash(),
-        };
-
-        let network_graph = Arc::new(NetworkGraph::new(
-            genesis_hash,
-            self.logger.clone(),
-        ));
-
-        self.keys_manager = Some(keys_manager);
-        self.network_graph = Some(network_graph);
-
-        Ok(())
-    }
-
-    /// Returns the node's public key (compressed secp256k1, 33 bytes).
-    #[wasm_bindgen(js_name = "getNodePubkey")]
-    pub fn get_node_pubkey(&self) -> Result<Uint8Array, JsValue> {
-        let km = self.keys_manager.as_ref()
-            .ok_or_else(|| JsValue::from_str("Not initialized"))?;
-
-        let secp = Secp256k1::new();
-        let pubkey = km.get_node_secret_key()
-            .public_key(&secp);
-
-        Ok(Uint8Array::from(pubkey.serialize().as_slice()))
-    }
-
-    /// Creates a BOLT11 invoice for receiving a payment.
-    #[wasm_bindgen(js_name = "createInvoice")]
-    pub fn create_invoice(&self, amount_msats: u64, description: &str, expiry_secs: u32) -> Result<String, JsValue> {
-        // For now, return a placeholder. Real invoice creation requires
-        // the channel manager to be fully initialized with a chain watcher.
-        let _ = (amount_msats, description, expiry_secs);
-        Err(JsValue::from_str("Invoice creation requires full channel manager initialization"))
-    }
-
-    /// Processes a raw Lightning message from a peer.
-    /// Used by the NOSTR transport layer.
-    #[wasm_bindgen(js_name = "processMessage")]
-    pub fn process_message(&self, peer_pubkey: &[u8], message: &[u8]) -> Result<Uint8Array, JsValue> {
-        let _ = (peer_pubkey, message);
-        // TODO: Feed message to PeerManager and return any response messages
-        Err(JsValue::from_str("Message processing not yet implemented"))
-    }
-
-    /// Serializes the channel manager state for persistence.
-    #[wasm_bindgen(js_name = "serializeState")]
-    pub fn serialize_state(&self) -> Result<Uint8Array, JsValue> {
-        // TODO: Serialize channel_manager to bytes
-        Err(JsValue::from_str("State serialization not yet implemented"))
-    }
-
-    /// Returns the current channel count.
-    #[wasm_bindgen(js_name = "getChannelCount")]
-    pub fn get_channel_count(&self) -> u32 {
-        self.channel_manager.as_ref()
-            .map(|cm| cm.list_channels().len() as u32)
-            .unwrap_or(0)
-    }
+    Ok(invoice.payment_hash().to_string())
 }

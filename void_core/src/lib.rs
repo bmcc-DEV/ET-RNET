@@ -1,4 +1,4 @@
-// mod ldk; // TODO: habilitar quando LDK crate APIs estabilizarem (lightning 0.1.x)
+mod ldk; // BOLT11 invoice parsing/generation via lightning-invoice
 
 use wasm_bindgen::prelude::*;
 use curve25519_dalek::scalar::Scalar;

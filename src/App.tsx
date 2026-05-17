@@ -67,6 +67,7 @@ const AcousticHandshakePanel = lazy(() => import("./components/AcousticHandshake
 const SphinxMixnetPanel = lazy(() => import("./components/SphinxMixnetPanel"));
 const DifferentialCorePanel = lazy(() => import("./components/DifferentialCorePanel"));
 const PaymentGatewayPanel = lazy(() => import("./components/PaymentGatewayPanel"));
+const WatchtowerPanel = lazy(() => import("./components/WatchtowerPanel"));
 const PaleoYieldPanel = lazy(() => import("./components/PaleoYieldPanel"));
 const NostrDEXPanel = lazy(() => import("./components/NostrDEXPanel"));
 const HGPUComputePanel = lazy(() => import("./components/HGPUComputePanel"));
@@ -212,6 +213,7 @@ export default function App() {
           <SphinxMixnetPanel />
           <DifferentialCorePanel />
           <PaymentGatewayPanel />
+          <WatchtowerPanel />
           <PaleoYieldPanel />
           <NostrDEXPanel />
           <HGPUComputePanel />

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { paymentGateway, type PaymentResult } from "../crypto/paymentGateway";
+import { createNwcInteropHarnessClient, runNwcInteropHarness, type NwcInteropReport } from "../crypto/nwcInteropHarness";
+
+type PaymentOpState = "idle" | "processing" | "retrying" | "success" | "error";
 
 export default function PaymentGatewayPanel() {
   const [nwcUri, setNwcUri] = useState("");
@@ -9,6 +12,11 @@ export default function PaymentGatewayPanel() {
   const [currency, setCurrency] = useState("BRL");
   const [label, setLabel] = useState("ETRNET Premium");
   const [result, setResult] = useState<PaymentResult | null>(null);
+  const [opState, setOpState] = useState<PaymentOpState>("idle");
+  const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; nextDelayMs: number } | null>(null);
+  const [retryRemainingMs, setRetryRemainingMs] = useState<number>(0);
+  const [interopRunning, setInteropRunning] = useState(false);
+  const [interopReport, setInteropReport] = useState<NwcInteropReport | null>(null);
   const [prices, setPrices] = useState<{ brl: number; usd: number; eur: number } | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const logRef = useRef<string[]>([]);
@@ -31,6 +39,26 @@ export default function PaymentGatewayPanel() {
   useEffect(() => {
     paymentGateway.isNWCConnected().then(setConnected);
   }, []);
+
+  useEffect(() => {
+    if (opState !== "retrying" || !retryInfo) {
+      setRetryRemainingMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setRetryRemainingMs(retryInfo.nextDelayMs);
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, retryInfo.nextDelayMs - elapsed);
+      setRetryRemainingMs(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [opState, retryInfo]);
 
   const handleConnect = async () => {
     if (!nwcUri.startsWith("nostr+walletconnect://")) {
@@ -65,9 +93,67 @@ export default function PaymentGatewayPanel() {
   };
 
   const handleCreatePayment = async () => {
-    const r = await paymentGateway.createPayment({ label, amount, currency });
+    setOpState("processing");
+    setRetryInfo(null);
+    const r = await paymentGateway.createPayment(
+      { label, amount, currency },
+      {
+        onRetry: (event) => {
+          setOpState("retrying");
+          setRetryInfo({
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            nextDelayMs: event.nextDelayMs,
+          });
+          addLog(
+            `RETRY [${event.code}] tentativa ${event.attempt + 1}/${event.maxAttempts} em ${event.nextDelayMs}ms`,
+          );
+        },
+      },
+    );
     setResult(r);
-    addLog(r.success ? `Invoice criada: ${r.amountSat} sats` : `ERRO: ${r.error}`);
+    setOpState(r.success ? "success" : "error");
+    addLog(
+      r.success
+        ? `Invoice criada: ${r.amountSat} sats${(r.attempts ?? 1) > 1 ? ` (retentativas: ${(r.attempts ?? 1) - 1})` : ""}`
+        : `ERRO${r.errorCode ? ` [${r.errorCode}]` : ""}: ${r.error}`,
+    );
+  };
+
+  const handleRunInteropHarness = async () => {
+    if (!nwcUri.startsWith("nostr+walletconnect://")) {
+      addLog("ERRO: URI inválido para interop harness.");
+      return;
+    }
+    setInteropRunning(true);
+    setInteropReport(null);
+    addLog("Iniciando NWC interop harness...");
+
+    try {
+      const report = await runNwcInteropHarness(nwcUri, {
+        timeoutMs: 12_000,
+        includeInvoiceFlow: true,
+        client: createNwcInteropHarnessClient(),
+      });
+      setInteropReport(report);
+      addLog(
+        `Interop finalizado: pass=${report.summary.passed} fail=${report.summary.failed} skipped=${report.summary.skipped}`,
+      );
+    } catch (err: any) {
+      addLog(`ERRO no interop harness: ${err?.message ?? String(err)}`);
+    } finally {
+      setInteropRunning(false);
+    }
+  };
+
+  const handleCopyInteropReport = async () => {
+    if (!interopReport) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(interopReport, null, 2));
+      addLog("Relatório de interop copiado para clipboard (JSON).");
+    } catch {
+      addLog("ERRO: não foi possível copiar o relatório para clipboard.");
+    }
   };
 
   return (
@@ -140,6 +226,82 @@ export default function PaymentGatewayPanel() {
             {/* Create Payment */}
             <div className="flex items-center justify-between mb-4">
               <span className="tag">CRIAR PAGAMENTO</span>
+              <div className={`font-mono text-[9px] tracking-[0.14em] ${
+                opState === "success"
+                  ? "text-[#b6ff3a]"
+                  : opState === "error"
+                    ? "text-red-400"
+                    : opState === "retrying"
+                      ? "text-[#ffd700]"
+                      : opState === "processing"
+                        ? "text-[#6cf0ff]"
+                        : "text-zinc-600"
+              }`}>
+                STATE: {opState.toUpperCase()}
+              </div>
+            </div>
+            {opState === "retrying" && retryInfo && (
+              <div className="mb-4 border border-[#14181c] bg-black px-3 py-2 font-mono text-[9px] text-zinc-400">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border border-[#ffd700]/60 border-t-transparent" />
+                  <span>
+                    retry {retryInfo.attempt + 1}/{retryInfo.maxAttempts} · próximo backoff em {(retryRemainingMs / 1000).toFixed(1)}s
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-4 border border-[#14181c] bg-black px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="tag">NWC INTEROP HARNESS</span>
+                <button
+                  onClick={handleRunInteropHarness}
+                  disabled={interopRunning}
+                  className={`px-3 py-1 font-mono text-[9px] tracking-[0.15em] transition-all ${
+                    interopRunning
+                      ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                      : "border border-[#14181c] text-[#6cf0ff] hover:text-white hover:border-[#6cf0ff]/40"
+                  }`}
+                >
+                  {interopRunning ? "RUNNING..." : "RUN NWC INTEROP"}
+                </button>
+              </div>
+              <div className="font-mono text-[9px] text-zinc-500">
+                Checks: connect, get_info, get_balance, list_transactions, make_invoice.
+              </div>
+              {interopReport && (
+                <div className="mt-3 border-t border-[#14181c] pt-2 font-mono text-[9px]">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-zinc-400">
+                      summary: pass={interopReport.summary.passed} fail={interopReport.summary.failed} skipped={interopReport.summary.skipped}
+                    </div>
+                    <button
+                      onClick={handleCopyInteropReport}
+                      className="border border-[#14181c] px-2 py-1 text-[8px] tracking-[0.1em] text-zinc-400 hover:text-white hover:border-zinc-500 transition-all"
+                    >
+                      COPY JSON
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {interopReport.checks.map((check) => (
+                      <div key={check.id} className="flex items-start justify-between gap-3">
+                        <div className="text-zinc-300">
+                          [{check.id}] {check.details}
+                        </div>
+                        <div className={
+                          check.status === "pass"
+                            ? "text-[#b6ff3a]"
+                            : check.status === "fail"
+                              ? "text-red-400"
+                              : "text-zinc-500"
+                        }>
+                          {check.status.toUpperCase()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2 mb-4">
@@ -208,6 +370,17 @@ export default function PaymentGatewayPanel() {
                   </div>
                 )}
                 {result.error && <div className="text-red-400">{result.error}</div>}
+                {result.errorCode && (
+                  <div className="text-[9px] text-zinc-500">code: {result.errorCode}</div>
+                )}
+                {result.errorHint && (
+                  <div className="text-[9px] text-zinc-500">{result.errorHint}</div>
+                )}
+                {typeof result.attempts === "number" && result.attempts > 1 && (
+                  <div className="text-[9px] text-zinc-500">
+                    tentativas totais: {result.attempts} (retentativas: {result.attempts - 1})
+                  </div>
+                )}
               </div>
             )}
           </div>

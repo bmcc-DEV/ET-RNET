@@ -9,19 +9,14 @@
  * Fluxo:
  * 1. Usuário fornece URI: nostr+walletconnect://<wallet_pk>?relay=<url>&secret=<hex>
  * 2. Client conecta ao relay NWC
- * 3. Client envia requests (kind 23194) criptografados NIP-44
+ * 3. Client envia requests (kind 23194) criptografados NIP-04
  * 4. Wallet processa e responde (kind 23195)
  * 5. Client decriptografa resposta e atualiza UI
  *
  * Referência: https://github.com/nostr-protocol/nips/blob/master/47.md
  */
 
-import { x25519 } from "@noble/curves/ed25519.js";
-import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { sha256 as _sha256 } from "@noble/hashes/sha2.js";
-const sha256 = _sha256 as unknown as Parameters<typeof hmac>[0];
-import { hmac } from "@noble/hashes/hmac.js";
-import { SimplePool, finalizeEvent, getPublicKey } from "nostr-tools";
+import { SimplePool, finalizeEvent, getPublicKey, nip04 } from "nostr-tools";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,81 +94,41 @@ export interface NWCTransaction {
 
 export type NWCEventListener = (response: NWCResponse) => void;
 
-// ─── NIP-44 Encryption ───────────────────────────────────────────────────────
+export type NWCClientFailureCode = NWCErrorCode | "NOT_CONNECTED" | "DISCONNECTED" | "TIMEOUT";
 
-/**
- * NIP-44 v2 encryption (X25519 + ChaCha20-Poly1305 + HKDF)
- *
- * Deriva shared secret via X25519, then HKDF para chave simétrica,
- * depois ChaCha20-Poly1305 para cifrar.
- */
-function nip44Encrypt(
-  plaintext: Uint8Array,
-  senderSecretKey: Uint8Array,
-  recipientPublicKey: Uint8Array,
-): Uint8Array {
-  // X25519 shared secret
-  const sharedSecret = x25519.getSharedSecret(senderSecretKey, recipientPublicKey);
+export class NWCClientError extends Error {
+  readonly code: NWCClientFailureCode;
+  readonly method: NWCMethod | undefined;
+  readonly nwcMessage: string | undefined;
 
-  // HKDF-Extract: PRK = HMAC-SHA256(salt, ikm)
-  const salt = new TextEncoder().encode("nip44-v2");
-  const prk = hmac(sha256, salt, sharedSecret);
-
-  // HKDF-Expand: produce 32 bytes for ChaCha20 key + 12 bytes for nonce
-  const info = new TextEncoder().encode("nip44-v2-enc");
-  const okm1 = hmac(sha256, prk, new Uint8Array([...info, 0x01]));
-  const okm2 = hmac(sha256, prk, new Uint8Array([...okm1, ...info, 0x02]));
-
-  const encryptionKey = okm1.slice(0, 32);
-  const nonce = okm2.slice(0, 12);
-
-  // ChaCha20-Poly1305 encrypt
-  const cipher = chacha20poly1305(encryptionKey, nonce);
-  const ciphertext = cipher.encrypt(plaintext);
-
-  // Format: version (2 bytes) + nonce (12 bytes) + ciphertext+tag
-  const version = new Uint8Array([0x00, 0x02]);
-  return new Uint8Array([...version, ...nonce, ...ciphertext]);
+  constructor(
+    message: string,
+    code: NWCClientFailureCode,
+    method?: NWCMethod,
+    nwcMessage?: string,
+  ) {
+    super(message);
+    this.name = "NWCClientError";
+    this.code = code;
+    this.method = method;
+    this.nwcMessage = nwcMessage;
+  }
 }
 
-/**
- * NIP-44 v2 decryption
- */
-function nip44Decrypt(
-  payload: Uint8Array,
-  recipientSecretKey: Uint8Array,
-  senderPublicKey: Uint8Array,
-): Uint8Array {
-  // Parse: version (2) + nonce (12) + ciphertext+tag
-  if (payload.length < 14) throw new Error("NIP-44: payload too short");
+type PoolLike = {
+  subscribeMany: (relays: string[], filter: unknown, handlers: {
+    onevent: (event: any) => void;
+    onclose: () => void;
+  }) => { close: () => void } | void;
+  publish: (relays: string[], event: unknown) => void;
+  close: (relays: string[]) => void;
+  ensureRelay?: (relay: string) => Promise<unknown>;
+};
 
-  const version = (payload[0] << 8) | payload[1];
-  if (version !== 2) throw new Error(`NIP-44: unsupported version ${version}`);
-
-  const nonce = payload.slice(2, 14);
-  const ciphertext = payload.slice(14);
-
-  // X25519 shared secret
-  const sharedSecret = x25519.getSharedSecret(recipientSecretKey, senderPublicKey);
-
-  // HKDF (same as encrypt)
-  const salt = new TextEncoder().encode("nip44-v2");
-  const prk = hmac(sha256, salt, sharedSecret);
-  const info = new TextEncoder().encode("nip44-v2-enc");
-  const okm1 = hmac(sha256, prk, new Uint8Array([...info, 0x01]));
-  const okm2 = hmac(sha256, prk, new Uint8Array([...okm1, ...info, 0x02]));
-
-  const encryptionKey = okm1.slice(0, 32);
-  const expectedNonce = okm2.slice(0, 12);
-
-  // Verify nonce matches
-  if (!nonce.every((b, i) => b === expectedNonce[i])) {
-    throw new Error("NIP-44: nonce mismatch");
-  }
-
-  // ChaCha20-Poly1305 decrypt
-  const cipher = chacha20poly1305(encryptionKey, nonce);
-  return cipher.decrypt(ciphertext);
+export interface NWCClientOptions {
+  poolFactory?: () => PoolLike;
+  serializeRequestContent?: (request: NWCRequest, connection: NWCConnection) => Promise<string> | string;
+  parseResponseEvent?: (event: any, connection: NWCConnection) => Promise<NWCResponse> | NWCResponse;
 }
 
 // ─── NWC Protocol ─────────────────────────────────────────────────────────────
@@ -204,8 +159,10 @@ export function parseNWCUri(uri: string): { walletPubKey: string; relay: string;
  * NWC Client — conecta a um wallet NWC via NOSTR relay
  */
 export class NWCClient {
+  private readonly options: NWCClientOptions;
   private connection: NWCConnection | null = null;
-  private pool: SimplePool | null = null;
+  private pool: PoolLike | null = null;
+  private responseSub: { close: () => void } | null = null;
   private listeners: Set<NWCEventListener> = new Set();
   private pendingRequests: Map<string, {
     method: NWCMethod;
@@ -213,11 +170,20 @@ export class NWCClient {
     reject: (reason: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
   }> = new Map();
+  private responseEventsReceived = 0;
+  private responseParseFailures = 0;
+
+  constructor(options: NWCClientOptions = {}) {
+    this.options = options;
+  }
 
   /**
    * Conecta a um wallet NWC via URI
    */
   async connect(uri: string): Promise<NWCConnection> {
+    // Evita múltiplas subscriptions paralelas no mesmo cliente.
+    this.disconnect();
+
     const { walletPubKey, relay, secret } = parseNWCUri(uri);
     const clientPubKey = getPublicKey(secret);
 
@@ -230,20 +196,29 @@ export class NWCClient {
     };
 
     // Connect to relay
-    this.pool = new SimplePool();
+    const pool = this.options.poolFactory?.() ?? (new SimplePool() as unknown as PoolLike);
+    this.pool = pool;
+    if (pool.ensureRelay) {
+      await pool.ensureRelay(relay);
+    }
 
     // Subscribe to responses (kind 23195)
-    this.pool.subscribeMany([relay], {
+    const maybeSub = pool.subscribeMany([relay], {
       kinds: [23195],
-      "#p": [clientPubKey],
+      authors: [walletPubKey],
     }, {
-      onevent: (event: any) => this.handleResponse(event),
+      onevent: (event: any) => {
+        void this.handleResponse(event);
+      },
       onclose: () => {
         if (this.connection) this.connection.connected = false;
       },
     });
+    this.responseSub = maybeSub ?? null;
 
     this.connection.connected = true;
+    this.responseEventsReceived = 0;
+    this.responseParseFailures = 0;
     console.log(`[NWC] Connected to wallet ${walletPubKey.slice(0, 8)}... via ${relay}`);
 
     return this.connection;
@@ -253,10 +228,16 @@ export class NWCClient {
    * Desconecta do wallet NWC
    */
   disconnect(): void {
-    if (this.pool) {
-      this.pool.close([]);
-      this.pool = null;
+    if (this.responseSub) {
+      try {
+        this.responseSub.close();
+      } catch {
+        // noop
+      }
+      this.responseSub = null;
     }
+
+    this.pool = null;
     if (this.connection) {
       this.connection.connected = false;
       this.connection = null;
@@ -264,7 +245,7 @@ export class NWCClient {
     // Reject all pending requests
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error("Disconnected"));
+      pending.reject(new NWCClientError("Disconnected", "DISCONNECTED", pending.method));
     }
     this.pendingRequests.clear();
   }
@@ -278,44 +259,43 @@ export class NWCClient {
     timeoutMs: number = 30000,
   ): Promise<NWCResponse> {
     if (!this.connection || !this.pool) {
-      throw new Error("NWC not connected");
+      throw new NWCClientError("NWC not connected", "NOT_CONNECTED", method);
     }
 
     const request: NWCRequest = { method, params };
-    const requestId = crypto.randomUUID();
-
-    // Encrypt request with NIP-44
-    const plaintext = new TextEncoder().encode(JSON.stringify(request));
-    const encrypted = nip44Encrypt(
-      plaintext,
-      this.connection.secret,
-      x25519.getPublicKey(
-        new Uint8Array(this.connection.walletPubKey.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)))
-      ),
-    );
+    const connection = this.connection;
+    const pool = this.pool;
+    const serializedContentMaybe = this.serializeRequestContent(request, connection);
+    const serializedContent = typeof serializedContentMaybe === "string"
+      ? serializedContentMaybe
+      : await serializedContentMaybe;
 
     // Create NOSTR event (kind 23194)
     const event = finalizeEvent({
       kind: 23194,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ["p", this.connection.walletPubKey],
-        ["e", requestId],
+        ["p", connection.walletPubKey],
       ],
-      content: String.fromCharCode(...encrypted),
-    }, this.connection.secret);
+      content: serializedContent,
+    }, connection.secret);
+    const requestEventId = event.id;
 
     // Publish
-    this.pool.publish([this.connection.relay], event);
+    pool.publish([connection.relay], event);
 
     // Wait for response
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new Error(`NWC request timeout: ${method}`));
+        this.pendingRequests.delete(requestEventId);
+        reject(new NWCClientError(
+          `NWC request timeout: ${method} (responses=${this.responseEventsReceived}, parse_failures=${this.responseParseFailures})`,
+          "TIMEOUT",
+          method,
+        ));
       }, timeoutMs);
 
-      this.pendingRequests.set(requestId, { method, resolve, reject, timeout });
+      this.pendingRequests.set(requestEventId, { method, resolve, reject, timeout });
     });
   }
 
@@ -327,10 +307,7 @@ export class NWCClient {
     if (amountMsats) params.amount = amountMsats;
 
     const response = await this.sendRequest("pay_invoice", params);
-
-    if (response.error) {
-      throw new Error(`NWC pay_invoice failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "pay_invoice");
 
     return { preimage: response.result!.preimage as string };
   }
@@ -347,10 +324,7 @@ export class NWCClient {
     if (expiry) params.expiry = expiry;
 
     const response = await this.sendRequest("make_invoice", params);
-
-    if (response.error) {
-      throw new Error(`NWC make_invoice failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "make_invoice");
 
     return {
       invoice: response.result!.invoice as string,
@@ -363,10 +337,7 @@ export class NWCClient {
    */
   async getBalance(): Promise<{ balance: number }> {
     const response = await this.sendRequest("get_balance");
-
-    if (response.error) {
-      throw new Error(`NWC get_balance failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "get_balance");
 
     return { balance: response.result!.balance as number };
   }
@@ -376,10 +347,7 @@ export class NWCClient {
    */
   async getInfo(): Promise<{ alias: string; color: string; pubkey: string; network: string; methods: string[] }> {
     const response = await this.sendRequest("get_info");
-
-    if (response.error) {
-      throw new Error(`NWC get_info failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "get_info");
 
     return response.result as any;
   }
@@ -404,10 +372,7 @@ export class NWCClient {
     if (type !== undefined) params.type = type;
 
     const response = await this.sendRequest("list_transactions", params);
-
-    if (response.error) {
-      throw new Error(`NWC list_transactions failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "list_transactions");
 
     return { transactions: response.result!.transactions as NWCTransaction[] };
   }
@@ -424,10 +389,7 @@ export class NWCClient {
     if (invoice) params.invoice = invoice;
 
     const response = await this.sendRequest("lookup_invoice", params);
-
-    if (response.error) {
-      throw new Error(`NWC lookup_invoice failed: ${response.error.code} — ${response.error.message}`);
-    }
+    this.assertNoError(response, "lookup_invoice");
 
     return response.result as unknown as NWCTransaction;
   }
@@ -456,15 +418,15 @@ export class NWCClient {
 
   // ─── Internal ──────────────────────────────────────────────────────────
 
-  private handleResponse(event: any): void {
+  private async handleResponse(event: any): Promise<void> {
     if (!this.connection) return;
+    this.responseEventsReceived++;
 
     try {
-      // Decrypt response with NIP-44
-      const encrypted = new Uint8Array(event.content.split("").map((c: string) => c.charCodeAt(0)));
-      const senderPk = new Uint8Array(event.pubkey.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
-      const decryptedText = nip44Decrypt(encrypted, this.connection.secret, senderPk);
-      const response: NWCResponse = JSON.parse(new TextDecoder().decode(decryptedText));
+      const responseMaybe = this.parseResponseEvent(event, this.connection);
+      const response = responseMaybe instanceof Promise
+        ? await responseMaybe
+        : responseMaybe;
 
       // Notify listeners
       for (const listener of this.listeners) {
@@ -480,8 +442,34 @@ export class NWCClient {
         pending.resolve(response);
       }
     } catch (err) {
+      this.responseParseFailures++;
       console.warn("[NWC] Failed to handle response:", err);
     }
+  }
+
+  private serializeRequestContent(request: NWCRequest, connection: NWCConnection): Promise<string> | string {
+    if (this.options.serializeRequestContent) {
+      return this.options.serializeRequestContent(request, connection);
+    }
+    return nip04.encrypt(connection.secret, connection.walletPubKey, JSON.stringify(request));
+  }
+
+  private parseResponseEvent(event: any, connection: NWCConnection): Promise<NWCResponse> | NWCResponse {
+    if (this.options.parseResponseEvent) {
+      return this.options.parseResponseEvent(event, connection);
+    }
+    const decryptedText = nip04.decrypt(connection.secret, event.pubkey, event.content);
+    return JSON.parse(decryptedText) as NWCResponse;
+  }
+
+  private assertNoError(response: NWCResponse, method: NWCMethod): void {
+    if (!response.error) return;
+    throw new NWCClientError(
+      `NWC ${method} failed: ${response.error.code} — ${response.error.message}`,
+      response.error.code,
+      method,
+      response.error.message,
+    );
   }
 }
 

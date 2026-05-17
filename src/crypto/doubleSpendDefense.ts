@@ -73,6 +73,17 @@ let wasmExports: {
 } | null = null;
 
 let wasmMemory: WebAssembly.Memory | null = null;
+let wasmMode: "uninitialized" | "native" | "fallback" = "uninitialized";
+let wasmFallbackLogged = false;
+
+function buildFallbackExports() {
+  return {
+    gf_mul: gfMulJS,
+    shamir_eval: shamirEvalJS,
+    wipe_0: () => {},
+    counter_increment: () => ++fallbackCounter,
+  };
+}
 
 export async function initWasm(): Promise<typeof wasmExports> {
   if (wasmExports) return wasmExports;
@@ -80,17 +91,22 @@ export async function initWasm(): Promise<typeof wasmExports> {
     const instance = await WebAssembly.instantiate(WASM_BINARY);
     wasmExports = instance.instance.exports as unknown as typeof wasmExports;
     wasmMemory = instance.instance.exports.memory as unknown as WebAssembly.Memory;
+    wasmMode = "native";
     return wasmExports;
   } catch (e) {
-    console.error("[DoubleSpend WASM] Falha ao inicializar WebAssembly:", e);
-    // Fallback: implementações JS equivalentes
-    return {
-      gf_mul: gfMulJS,
-      shamir_eval: shamirEvalJS,
-      wipe_0: () => {},
-      counter_increment: () => ++fallbackCounter,
-    };
+    wasmMode = "fallback";
+    wasmMemory = null;
+    wasmExports = buildFallbackExports();
+    if (!wasmFallbackLogged) {
+      wasmFallbackLogged = true;
+      console.warn("[DoubleSpend WASM] Falha ao inicializar WebAssembly; usando fallback JS.", e);
+    }
+    return wasmExports;
   }
+}
+
+function isWasmNativeReady(): boolean {
+  return wasmMode === "native" && wasmMemory !== null;
 }
 
 // ─── Fallback GF(256) in pure JS (quando WASM não disponível) ────────────────
@@ -298,9 +314,9 @@ export class SlashingDefenseEngine {
 
   private async ensureWasm() {
     if (!this.wasmReady) {
-      const wasm = await initWasm();
+      await initWasm();
       this.wasmReady = true;
-      this.useWasm = wasm !== null;
+      this.useWasm = isWasmNativeReady();
     }
   }
 

@@ -45,9 +45,12 @@ export class NostrWebRTCMesh {
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private dataChannels: Map<string, RTCDataChannel> = new Map();
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private announceInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly enabled: boolean;
 
-  constructor(relays?: string[]) {
+  constructor(relays?: string[], options?: { enabled?: boolean }) {
     if (relays) this.relays = relays;
+    this.enabled = options?.enabled ?? true;
 
     // Inicializa health tracking
     for (const url of this.relays) {
@@ -61,6 +64,11 @@ export class NostrWebRTCMesh {
       });
     }
 
+    if (!this.enabled) {
+      console.warn("[NostrMesh] Desativado neste ambiente (modo seguro de desenvolvimento).");
+      return;
+    }
+
     // Escuta por ofertas WebRTC endereçadas a esta PK
     this.listenForSignaling();
 
@@ -69,7 +77,7 @@ export class NostrWebRTCMesh {
 
     // Anuncia presença na rede
     this.announcePresence();
-    setInterval(() => this.announcePresence(), 60000);
+    this.announceInterval = setInterval(() => this.announcePresence(), 60000);
 
     // Health check a cada 30s
     this.healthCheckInterval = setInterval(() => this.checkRelayHealth(), 30000);
@@ -363,6 +371,10 @@ export class NostrWebRTCMesh {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
     }
+    if (this.announceInterval) {
+      clearInterval(this.announceInterval);
+      this.announceInterval = null;
+    }
     this.peerConnections.forEach(pc => {
       try { pc.close(); } catch { /* ignora */ }
     });
@@ -371,4 +383,18 @@ export class NostrWebRTCMesh {
   }
 }
 
-export const nostrMesh = new NostrWebRTCMesh();
+const isLocalDev =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+let forceEnableInDev = false;
+try {
+  forceEnableInDev = typeof window !== "undefined"
+    && window.localStorage.getItem("VOID_ENABLE_NOSTR_MESH") === "true";
+} catch {
+  forceEnableInDev = false;
+}
+
+const enableNostrMesh = !isLocalDev || forceEnableInDev;
+
+export const nostrMesh = new NostrWebRTCMesh(undefined, { enabled: enableNostrMesh });

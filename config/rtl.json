@@ -1,0 +1,35 @@
+{
+  "multiPass": "TROCA_ISSO",
+  "port": "3000",
+  "defaultNodeIndex": 1,
+  "dbDirectoryPath": "/RTL",
+  "SSO": { "rtlSSO": 0 },
+  "nodes": [
+    {
+      "index": 1,
+      "lnNode": "VOID-LND",
+      "lnImplementation": "LND",
+      "Authentication": {
+        "macaroonPath": "/root/.lnd/data/chain/bitcoin/regtest",
+        "configPath": "/root/.lnd/lnd.conf"
+      },
+      "Settings": {
+        "userPersona": "OPERATOR",
+        "themeMode": "NIGHT",
+        "themeColor": "PURPLE",
+        "logLevel": "WARNING",
+        "lnServerUrl": "https://lnd:8080",
+        "fiatConversion": false,
+        "unannouncedChannels": false
+      },
+      "NWC": {
+        "isActive": true,
+        "relays": ["wss://relay.primal.net", "wss://relay.damus.io"],
+        "budgetAmount": 1000,
+        "budgetCurrency": "SATS",
+        "budgetRenewal": "DAILY",
+        "isEnabled": true
+      }
+    }
+  ]
+}

@@ -13,6 +13,7 @@
  * LDK WASM removido — secp256k1-sys não compila para wasm32
  * Bitcoin on-chain removido — fake invoices
  */
+import type { NWCClientFailureCode } from "./nwcProtocol";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,9 @@ export interface PaymentResult {
   paymentHash?: string;
   preimage?: string;
   error?: string;
+  errorCode?: NWCClientFailureCode | "UNKNOWN";
+  errorHint?: string;
+  attempts?: number;
 }
 
 export interface NWCWalletInfo {
@@ -97,6 +101,173 @@ class NWCPayment {
 
     return nwcClient.payInvoice(invoice, this.amountSat * 1000);
   }
+}
+
+const FRIENDLY_NWC_ERRORS: Record<NWCClientFailureCode, { message: string; hint: string }> = {
+  NOT_CONNECTED: {
+    message: "Wallet NWC não conectada.",
+    hint: "Conecte uma URI nostr+walletconnect válida antes de enviar.",
+  },
+  DISCONNECTED: {
+    message: "Conexão NWC encerrada durante a operação.",
+    hint: "Reconecte a wallet e tente novamente.",
+  },
+  TIMEOUT: {
+    message: "Timeout no relay/wallet NWC.",
+    hint: "Verifique conectividade do relay e tente novamente em alguns segundos.",
+  },
+  INSUFFICIENT_BALANCE: {
+    message: "Saldo insuficiente para concluir o pagamento.",
+    hint: "Reduza o valor ou reabasteça a wallet Lightning.",
+  },
+  PAYMENT_REJECTED: {
+    message: "Pagamento rejeitado pela wallet.",
+    hint: "Confira validade da invoice e permissões NWC.",
+  },
+  PAYMENT_FAILED: {
+    message: "Falha no pagamento Lightning.",
+    hint: "Tente novamente com rota/valor diferente.",
+  },
+  PAYMENT_TIMEOUT: {
+    message: "Pagamento expirou antes da confirmação.",
+    hint: "Gere nova invoice ou aumente a janela de expiração.",
+  },
+  RATE_LIMITED: {
+    message: "Limite de requisições atingido na wallet/relay.",
+    hint: "Aguarde alguns segundos antes de repetir a operação.",
+  },
+  QUOTA_EXCEEDED: {
+    message: "Quota da integração NWC foi excedida.",
+    hint: "Revise limites do provedor NWC e tente novamente.",
+  },
+  RESTRICTED: {
+    message: "Operação bloqueada pela política da wallet.",
+    hint: "Revise permissões do token NWC para este método.",
+  },
+  UNAUTHORIZED: {
+    message: "Token/secret NWC não autorizado.",
+    hint: "Recrie a URI NWC com escopos corretos e reconecte.",
+  },
+  NOT_IMPLEMENTED: {
+    message: "Método NWC não implementado pela wallet.",
+    hint: "Use uma wallet com suporte ao método solicitado.",
+  },
+  INTERNAL: {
+    message: "Erro interno da wallet NWC.",
+    hint: "Tente novamente; se persistir, troque de relay ou wallet.",
+  },
+  OTHER: {
+    message: "Falha genérica retornada pela wallet NWC.",
+    hint: "Verifique logs e detalhes da wallet para diagnóstico.",
+  },
+};
+
+function isNwcFailureCode(value: unknown): value is NWCClientFailureCode {
+  return typeof value === "string" && value in FRIENDLY_NWC_ERRORS;
+}
+
+export interface NwcRetryPolicy {
+  maxRetries: number;
+  baseDelayMs: number;
+  backoffMultiplier: number;
+}
+
+export interface NwcRetryEvent {
+  attempt: number;
+  maxAttempts: number;
+  code: NWCClientFailureCode;
+  nextDelayMs: number;
+}
+
+export interface PaymentExecutionOptions {
+  onRetry?: (event: NwcRetryEvent) => void;
+}
+
+const DEFAULT_NWC_RETRY_POLICY: NwcRetryPolicy = {
+  maxRetries: 2,
+  baseDelayMs: 250,
+  backoffMultiplier: 2,
+};
+
+const RETRYABLE_NWC_CODES = new Set<NWCClientFailureCode>([
+  "TIMEOUT",
+  "RATE_LIMITED",
+  "PAYMENT_TIMEOUT",
+]);
+
+function isRetryableNwcCode(code: NWCClientFailureCode | "UNKNOWN"): code is NWCClientFailureCode {
+  return code !== "UNKNOWN" && RETRYABLE_NWC_CODES.has(code);
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function executeWithNwcRetry<T>(
+  operation: () => Promise<T>,
+  retryPolicy: Partial<NwcRetryPolicy> = {},
+  onRetry?: (event: NwcRetryEvent) => void,
+): Promise<{ result?: T; attempts: number; lastError?: unknown }> {
+  const policy: NwcRetryPolicy = {
+    maxRetries: retryPolicy.maxRetries ?? DEFAULT_NWC_RETRY_POLICY.maxRetries,
+    baseDelayMs: retryPolicy.baseDelayMs ?? DEFAULT_NWC_RETRY_POLICY.baseDelayMs,
+    backoffMultiplier: retryPolicy.backoffMultiplier ?? DEFAULT_NWC_RETRY_POLICY.backoffMultiplier,
+  };
+  let attempts = 0;
+  let lastError: unknown;
+
+  while (attempts <= policy.maxRetries) {
+    attempts++;
+    try {
+      const result = await operation();
+      return { result, attempts };
+    } catch (err) {
+      lastError = err;
+      const mapped = mapNwcError(err);
+      const retryableCode = isRetryableNwcCode(mapped.code) ? mapped.code : null;
+      const canRetry = retryableCode !== null && attempts <= policy.maxRetries;
+      if (!canRetry) {
+        return { attempts, lastError };
+      }
+      const backoff = policy.baseDelayMs * Math.pow(policy.backoffMultiplier, attempts - 1);
+      onRetry?.({
+        attempt: attempts,
+        maxAttempts: policy.maxRetries + 1,
+        code: retryableCode,
+        nextDelayMs: backoff,
+      });
+      await delay(backoff);
+    }
+  }
+  return { attempts, lastError };
+}
+
+export function mapNwcError(err: unknown): { code: NWCClientFailureCode | "UNKNOWN"; message: string; hint: string } {
+  if (err && typeof err === "object") {
+    const maybeCode = (err as { code?: unknown }).code;
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (isNwcFailureCode(maybeCode)) {
+      const friendly = FRIENDLY_NWC_ERRORS[maybeCode];
+      return {
+        code: maybeCode,
+        message: friendly.message,
+        hint: friendly.hint,
+      };
+    }
+    if (typeof maybeMessage === "string" && maybeMessage.trim().length > 0) {
+      return {
+        code: "UNKNOWN",
+        message: maybeMessage,
+        hint: "Verifique logs locais e o status da wallet NWC.",
+      };
+    }
+  }
+  return {
+    code: "UNKNOWN",
+    message: "Erro inesperado no gateway de pagamento.",
+    hint: "Tente novamente e valide conexão com relay/wallet.",
+  };
 }
 
 // ─── Unified Payment Gateway ─────────────────────────────────────────────────
@@ -195,11 +366,29 @@ export class PaymentGateway {
    * Cria pagamento (invoice) via NWC.
    * Falha se NWC não conectado.
    */
-  async createPayment(item: PaymentItem): Promise<PaymentResult> {
+  async createPayment(item: PaymentItem, options: PaymentExecutionOptions = {}): Promise<PaymentResult> {
     try {
       const amountSat = await this.fiatToSat(item.amount, item.currency);
       const payment = new NWCPayment(amountSat);
-      const { invoice, paymentHash } = await payment.createInvoice();
+      const outcome = await executeWithNwcRetry(
+        () => payment.createInvoice(),
+        {},
+        options.onRetry,
+      );
+      if (!outcome.result) {
+        const mapped = mapNwcError(outcome.lastError);
+        return {
+          success: false,
+          method: "nwc",
+          error: mapped.message,
+          errorCode: mapped.code,
+          errorHint: outcome.attempts > 1
+            ? `${mapped.hint} (${outcome.attempts - 1} retentativa(s) automática(s) aplicadas.)`
+            : mapped.hint,
+          attempts: outcome.attempts,
+        };
+      }
+      const { invoice, paymentHash } = outcome.result;
 
       return {
         success: true,
@@ -207,27 +396,63 @@ export class PaymentGateway {
         invoice,
         amountSat,
         paymentHash,
+        attempts: outcome.attempts,
       };
-    } catch (err: any) {
-      return { success: false, method: "nwc", error: err.message };
+    } catch (err: unknown) {
+      const mapped = mapNwcError(err);
+      return {
+        success: false,
+        method: "nwc",
+        error: mapped.message,
+        errorCode: mapped.code,
+        errorHint: mapped.hint,
+        attempts: 1,
+      };
     }
   }
 
   /**
    * Paga uma invoice BOLT11 via NWC.
    */
-  async pay(invoice: string, amountSat?: number): Promise<PaymentResult> {
+  async pay(invoice: string, amountSat?: number, options: PaymentExecutionOptions = {}): Promise<PaymentResult> {
     try {
       const payment = new NWCPayment(amountSat ?? 0);
-      const { preimage } = await payment.payInvoice(invoice);
+      const outcome = await executeWithNwcRetry(
+        () => payment.payInvoice(invoice),
+        {},
+        options.onRetry,
+      );
+      if (!outcome.result) {
+        const mapped = mapNwcError(outcome.lastError);
+        return {
+          success: false,
+          method: "nwc",
+          error: mapped.message,
+          errorCode: mapped.code,
+          errorHint: outcome.attempts > 1
+            ? `${mapped.hint} (${outcome.attempts - 1} retentativa(s) automática(s) aplicadas.)`
+            : mapped.hint,
+          attempts: outcome.attempts,
+        };
+      }
+      const { preimage } = outcome.result;
 
       return {
         success: true,
         method: "nwc",
         preimage,
+        attempts: outcome.attempts,
       };
-    } catch (err: any) {
-      return { success: false, method: "nwc", error: err.message };
+    } catch (err: unknown) {
+      const mapped = mapNwcError(err);
+      return {
+        success: false,
+        method: "nwc",
+        error: mapped.message,
+        errorCode: mapped.code,
+        errorHint: mapped.hint,
+        attempts: 1,
+      };
     }
   }
 

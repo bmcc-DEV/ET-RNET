@@ -6,6 +6,8 @@
     <meta name="description" content="VØID Ecosystem – Protocolos de próxima geração para anonimato, resiliência e autonomia financeira." />
     <meta name="theme-color" content="#b6ff3a" />
     <title>VØID // Ecosystem · Hydra · Ωmega</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,19 +17,5 @@
   <body class="bg-black">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker
-            .register("/sw.js")
-            .then((reg) => {
-              console.log("[VØID] ServiceWorker registered successfully:", reg.scope);
-            })
-            .catch((err) => {
-              console.error("[VØID] ServiceWorker registration failed:", err);
-            });
-        });
-      }
-    </script>
   </body>
 </html>

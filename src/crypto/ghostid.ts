@@ -3,8 +3,15 @@ import { sha3_256 } from "@noble/hashes/sha3.js";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { generateQuantumEntropy } from "./quantumBridge";
 import { x25519 } from "@noble/curves/ed25519.js";
+import { generateHelperData, type BiometricEntropy, type FuzzyHelperData } from "./fuzzyExtractor";
 
 // --- Types ---
+export interface SpawnProgress {
+  stage: string;
+  detail: string;
+  elapsed: number;
+}
+
 export interface GhostIdentity {
   handle: string;
   publicKey: Uint8Array;        // Ed25519 public key (identity)
@@ -13,20 +20,8 @@ export interface GhostIdentity {
   x25519SecretKey: Uint8Array;  // X25519 secret key (for ECDH, zeroed after spawn)
   entropyBits: number;
   quantumVerified: boolean; // Flag: QRNG via vHGPU
-}
-
-export interface SpawnProgress {
-  stage: string;
-  detail: string;
-  elapsed: number;
-}
-
-export interface BiometricEntropy {
-  keystrokeDynamics: number[];
-  accelerometerPattern: Float32Array;
-  touchPressureMap: Uint8Array;
-  microphoneNoise: Uint8Array;
-  hardwareTimestamp: number;
+  /** Dados auxiliares do Fuzzy Extractor para re-extração biométrica */
+  fuzzyHelperData?: FuzzyHelperData;
 }
 
 let wasmInitialized = false;
@@ -149,33 +144,22 @@ export async function spawnGhostId(
   }
 
   if (onProgress) onProgress({ stage: "biometric", detail: "Coletando entropia biométrica passiva...", elapsed: performance.now() - t0 });
-  
+
   // Collect biometric entropy
   const bioEntropy = await collectBiometricEntropy();
-  
-  // Combine all entropy sources: quantum (32) + bio (64+16+24+32=136) = 168
-  const entropy = new Uint8Array(168);
+
+  // Fuzzy Extractor: estabiliza entropia biométrica ruidosa em chave determinística
+  const { helperData: fuzzyHelperData, stableKey: biometricStableKey } = generateHelperData(bioEntropy);
+
+  // Combine all entropy sources: quantum (32) + bio_stable (64) = 96
+  const entropy = new Uint8Array(96);
   let offset = 0;
 
   entropy.set(quantumEntropy, offset);       // 32 bytes
   offset += 32;
 
-  entropy.set(new Uint8Array(bioEntropy.accelerometerPattern.buffer), offset); // 64 bytes
-  offset += bioEntropy.accelerometerPattern.byteLength;
-
-  entropy.set(bioEntropy.touchPressureMap.slice(0, 16), offset); // 16 bytes
-  offset += 16;
-
-  entropy.set(bioEntropy.microphoneNoise.slice(0, 24), offset); // 24 bytes
-  offset += 24;
-
-  // Fill remainder with keystroke timing (up to 32 bytes)
-  for (let i = 0; i < bioEntropy.keystrokeDynamics.length && offset + 1 < 168; i++) {
-    const ts = bioEntropy.keystrokeDynamics[i] || 0;
-    entropy[offset] = ts & 0xff;
-    entropy[offset + 1] = (ts >> 8) & 0xff;
-    offset += 2;
-  }
+  entropy.set(biometricStableKey, offset);   // 64 bytes do fuzzy extractor (estável)
+  offset += 64;
 
   if (onProgress) onProgress({ stage: "argon2id", detail: "Aplicando Argon2id (64MB, 3 iter)...", elapsed: performance.now() - t0 });
   
@@ -203,8 +187,9 @@ export async function spawnGhostId(
     privateKey: new Uint8Array(32), // WASM não expõe a chave privada (design de segurança intencional)
     x25519PublicKey: x25519Public,
     x25519SecretKey: x25519Secret,
-    entropyBits: 512 + bioEntropy.keystrokeDynamics.length * 8 + (quantumVerified ? 256 : 0),
+    entropyBits: 512 + 256 + (quantumVerified ? 256 : 0), // WASM(512) + fuzzy(256) + quantum(256)
     quantumVerified,
+    fuzzyHelperData, // Armazenado para re-extração biométrica futura
   };
 }
 

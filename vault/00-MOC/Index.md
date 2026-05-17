@@ -28,6 +28,10 @@
 ## Arquitetura
 - [[Arquitetura Produção v1.0]] — o que entra, o que é deferido
 - [[Refatoração v1.0]] — bugs corrigidos, pendências
+- [[VOID - Mapa Mental Geral]] — síntese da pasta `DOC/` em mapa mental
+- [[VOID - Realidade do Código]] — matriz real/parcial/simulado/teórico
+- [[VOID - Simulações e Faltantes]] — lista do que falta ou é demo
+- [[VOID - Plano de Conclusão]] — corte recomendado para fechar v1.0
 
 ## Teoria (deferido)
 

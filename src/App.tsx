@@ -118,16 +118,48 @@ export default function App() {
   const [browser] = useState(detectBrowser);
 
   useEffect(() => {
+    const isLocalDev =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    const isKnownRelayNoise = (reason: unknown): boolean => {
+      if (!(reason instanceof Error)) return false;
+      const msg = reason.message.toLowerCase();
+      return msg.includes("invalid: id is computed incorrectly")
+        || msg.includes("rate-limited")
+        || msg.includes("pow:");
+    };
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (!isLocalDev) return;
+      if (isKnownRelayNoise(event.reason)) {
+        event.preventDefault();
+      }
+    };
+
     if (nativeBridge.isAvailable()) {
       nativeBridge.activateCarrierService();
     }
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").then(() => {
-          console.log("[VØID] Service Worker registrado no Stratum 3.");
+      if (!isLocalDev) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").then(() => {
+            console.log("[VØID] Service Worker registrado no Stratum 3.");
+          });
         });
-      });
+      } else {
+        // Em dev, SW causa cache de chunks antigos e quebra HMR/hooks.
+        void navigator.serviceWorker.getRegistrations().then((registrations) => {
+          registrations.forEach((registration) => {
+            void registration.unregister();
+          });
+        });
+      }
     }
+
+    return () => {
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
   }, []);
 
   return (

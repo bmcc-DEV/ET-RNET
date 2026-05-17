@@ -12,6 +12,7 @@ export interface Node {
 }
 
 export interface ShardTrace {
+  traceId: string;
   id: string;
   from: string;
   to: string;
@@ -22,6 +23,7 @@ export interface ShardTrace {
 export function useNetworkSimulation(nodeCount = 15) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [traces, setTraces] = useState<ShardTrace[]>([]);
+  const tracesRef = useRef<ShardTrace[]>([]);
   const lastUpdate = useRef(Date.now());
 
   // Initialize nodes
@@ -100,8 +102,13 @@ export function useNetworkSimulation(nodeCount = 15) {
               if (secureRandom() < 0.05) { // Slow down for visualization
                 const shard = a.shards[0];
                 // Check if already in trace
-                if (!traces.some(t => t.id === shard && t.to === b.id)) {
+                const activeTraces = tracesRef.current;
+                const alreadyRouting = activeTraces.some(
+                  (t) => t.id === shard && t.from === a.id && t.to === b.id && t.progress < 1,
+                );
+                if (!alreadyRouting) {
                   newTraces.push({
+                    traceId: `${shard}-${a.id}-${b.id}-${now}-${secureRandom().toFixed(6)}`,
                     id: shard,
                     from: a.id,
                     to: b.id,
@@ -115,7 +122,11 @@ export function useNetworkSimulation(nodeCount = 15) {
         }
 
         if (newTraces.length > 0) {
-           setTraces(prev => [...prev, ...newTraces]);
+           setTraces(prev => {
+            const merged = [...prev, ...newTraces];
+            tracesRef.current = merged;
+            return merged;
+           });
         }
 
         return nextNodes;
@@ -125,6 +136,7 @@ export function useNetworkSimulation(nodeCount = 15) {
       setTraces(prev => {
         const updated = prev.map(t => ({ ...t, progress: t.progress + 2 * dt }))
                              .filter(t => t.progress < 1);
+        tracesRef.current = updated;
         
         // When trace finishes, move shard to target node
         updated.forEach(t => {
@@ -144,7 +156,7 @@ export function useNetworkSimulation(nodeCount = 15) {
     }, 50);
 
     return () => clearInterval(interval);
-  }, [traces]);
+  }, []);
 
   return { nodes, traces };
 }

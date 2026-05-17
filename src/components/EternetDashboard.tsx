@@ -219,20 +219,32 @@ export default function EternetDashboard() {
   // Load initial peers and pool from Service Worker proxy APIs
   useEffect(() => {
     const loadPeersAndPool = async () => {
+      const parseJsonResponse = async (response: Response) => {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new Error("response_not_json");
+        }
+        return response.json();
+      };
+
       try {
         const peersRes = await fetch("/api/eternet/peers");
-        const peersData = await peersRes.json();
+        const peersData = await parseJsonResponse(peersRes);
         if (peersData.status === "success") {
           setPeers(peersData.peers);
         }
 
         const poolRes = await fetch("/api/eternet/pool");
-        const poolData = await poolRes.json();
+        const poolData = await parseJsonResponse(poolRes);
         if (poolData.status === "success") {
           setPool(poolData.pool);
         }
       } catch (err) {
-        console.warn("Could not fetch local Eternet API directly, falling back to local simulation.", err);
+        if (err instanceof Error && err.message === "response_not_json") {
+          console.warn("Eternet API local indisponível em dev; fallback para simulação local.");
+        } else {
+          console.warn("Could not fetch local Eternet API directly, falling back to local simulation.", err);
+        }
       }
     };
 

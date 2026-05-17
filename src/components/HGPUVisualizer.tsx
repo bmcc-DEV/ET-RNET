@@ -86,7 +86,7 @@ const FRAGMENT_SHADER = `
 
 export default function HGPUVisualizer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isActive, setIsActive] = useState(true);
+  const [isActive] = useState(true);
 
   // Homotopic Cache and vHGPU spectral coefficients simulation
   const homotopyCache = useRef<Map<number, Float32Array>>(new Map());
@@ -114,13 +114,27 @@ export default function HGPUVisualizer() {
       const shader = gl.createShader(type)!;
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const log = gl.getShaderInfoLog(shader) ?? "shader compile error";
+        gl.deleteShader(shader);
+        throw new Error(log);
+      }
       return shader;
     };
 
     const program = gl.createProgram()!;
-    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER));
-    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER));
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const log = gl.getProgramInfoLog(program) ?? "program link error";
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      gl.deleteProgram(program);
+      throw new Error(log);
+    }
     gl.useProgram(program);
 
     // Geometry
@@ -134,11 +148,20 @@ export default function HGPUVisualizer() {
 
     const resLoc = gl.getUniformLocation(program, "resolution");
     const timeLoc = gl.getUniformLocation(program, "time");
+    if (!resLoc || !timeLoc) {
+      gl.deleteBuffer(buffer);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      gl.deleteProgram(program);
+      return;
+    }
 
     let startTime = Date.now();
+    let rafId = 0;
+    let disposed = false;
 
     const render = () => {
-      if (!isActive) return;
+      if (!isActive || disposed) return;
       
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
@@ -148,17 +171,23 @@ export default function HGPUVisualizer() {
         gl.viewport(0, 0, width, height);
       }
 
+      gl.useProgram(program);
       gl.uniform2f(resLoc, width, height);
       gl.uniform1f(timeLoc, (Date.now() - startTime) / 1000);
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      requestAnimationFrame(render);
+      rafId = requestAnimationFrame(render);
     };
 
     render();
 
     return () => {
-      setIsActive(false);
+      disposed = true;
+      cancelAnimationFrame(rafId);
+      gl.deleteBuffer(buffer);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      gl.deleteProgram(program);
     };
   }, []);
 

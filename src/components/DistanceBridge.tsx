@@ -1,6 +1,9 @@
+import { useEffect, useMemo, useState } from "react";
 import SectionHeader from "./SectionHeader";
 import KarmaWallet from "./KarmaWallet";
 import { useNetworkSimulation } from "./NetworkSimCore";
+import { useVoid } from "../core/useVoid";
+import type { DistanceBridgeChannel, DistanceBridgeMetrics } from "../network/distanceBridge";
 
 const modes = [
   {
@@ -41,6 +44,75 @@ const modes = [
 ];
 
 export default function DistanceBridge() {
+  const { orchestrator } = useVoid();
+  const [metrics, setMetrics] = useState<DistanceBridgeMetrics>(() => orchestrator.getTransportMetrics());
+  const [windowSize, setWindowSize] = useState<12 | 24 | 40>(24);
+  const [channelFilter, setChannelFilter] = useState<"ALL" | DistanceBridgeChannel>("ALL");
+
+  useEffect(() => {
+    const refresh = () => setMetrics(orchestrator.getTransportMetrics());
+    refresh();
+
+    const interval = setInterval(refresh, 1000);
+    const unsubscribe = orchestrator.subscribe((event) => {
+      if (event.type === "SHARD_SENT" || event.type === "SHARD_RECEIVED") {
+        refresh();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
+  }, [orchestrator]);
+
+  const fallbackRate = useMemo(() => {
+    if (metrics.totalRouted === 0) return 0;
+    return (metrics.totalFallbacks / metrics.totalRouted) * 100;
+  }, [metrics.totalFallbacks, metrics.totalRouted]);
+
+  const channelRows = useMemo(() => ([
+    { id: "BLE", label: "BLE", value: metrics.channels.BLE },
+    { id: "LoRa", label: "LoRa", value: metrics.channels.LoRa },
+    { id: "HCN_MESH", label: "HCN Mesh", value: metrics.channels.HCN_MESH },
+    { id: "WEBRTC", label: "WebRTC/NOSTR", value: metrics.channels.WEBRTC },
+  ]), [metrics]);
+
+  const recentSamples = useMemo(() => {
+    const byChannel = channelFilter === "ALL"
+      ? metrics.recentRoutes
+      : metrics.recentRoutes.filter((sample) => sample.selected === channelFilter);
+    return byChannel.slice(-windowSize);
+  }, [channelFilter, metrics.recentRoutes, windowSize]);
+
+  const fallbackTrend = useMemo(() => {
+    if (recentSamples.length === 0) return [];
+    const rolling = Math.min(5, recentSamples.length);
+    return recentSamples.map((_, idx) => {
+      const start = Math.max(0, idx - rolling + 1);
+      const window = recentSamples.slice(start, idx + 1);
+      const fallbacks = window.filter((sample) => sample.fallbackUsed).length;
+      return (fallbacks / window.length) * 100;
+    });
+  }, [recentSamples]);
+
+  const trendPath = useMemo(() => {
+    if (fallbackTrend.length === 0) return "";
+    if (fallbackTrend.length === 1) return `M 0 ${100 - fallbackTrend[0]}`;
+    return fallbackTrend
+      .map((value, idx) => {
+        const x = (idx / (fallbackTrend.length - 1)) * 100;
+        const y = 100 - value;
+        return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
+      })
+      .join(" ");
+  }, [fallbackTrend]);
+
+  const handleResetMetrics = () => {
+    orchestrator.resetTransportMetrics();
+    setMetrics(orchestrator.getTransportMetrics());
+  };
+
   return (
     <section id="bridge" className="relative border-b border-[#14181c]">
       <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
@@ -98,6 +170,152 @@ export default function DistanceBridge() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Transport telemetry */}
+        <div className="mt-12 border border-[#14181c] bg-[#0a0d10]">
+          <div className="flex items-center justify-between border-b border-[#14181c] px-6 py-4">
+            <div className="tag">TELEMETRIA · DISTANCE BRIDGE</div>
+            <button
+              type="button"
+              onClick={handleResetMetrics}
+              className="font-mono text-[10px] tracking-[0.2em] text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              RESET METRICS
+            </button>
+          </div>
+          <div className="grid gap-px border-b border-[#14181c] bg-[#14181c] sm:grid-cols-3">
+            <div className="bg-black px-6 py-4">
+              <div className="tag mb-2">TOTAL ROUTED</div>
+              <div className="font-mono text-2xl text-[#b6ff3a]">{metrics.totalRouted}</div>
+            </div>
+            <div className="bg-black px-6 py-4">
+              <div className="tag mb-2">TOTAL FALLBACKS</div>
+              <div className="font-mono text-2xl text-[#b6ff3a]">{metrics.totalFallbacks}</div>
+            </div>
+            <div className="bg-black px-6 py-4">
+              <div className="tag mb-2">FALLBACK RATE</div>
+              <div className="font-mono text-2xl text-[#b6ff3a]">{fallbackRate.toFixed(1)}%</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-12 gap-4 px-6 py-4 font-mono text-[10px] tracking-[0.2em] text-zinc-500">
+            <div className="col-span-4">CHANNEL</div>
+            <div className="col-span-2">ATTEMPTS</div>
+            <div className="col-span-2">SUCCESS</div>
+            <div className="col-span-2">FAIL</div>
+            <div className="col-span-2">SUCCESS RATE</div>
+          </div>
+          {channelRows.map((row) => {
+            const successRate = row.value.attempts > 0
+              ? (row.value.successes / row.value.attempts) * 100
+              : 0;
+            return (
+              <div
+                key={row.id}
+                className="grid grid-cols-12 gap-4 border-t border-[#14181c] px-6 py-4 font-mono text-xs text-zinc-300"
+              >
+                <div className="col-span-4 text-zinc-100">{row.label}</div>
+                <div className="col-span-2">{row.value.attempts}</div>
+                <div className="col-span-2 text-[#b6ff3a]">{row.value.successes}</div>
+                <div className="col-span-2 text-[#ff6b6b]">{row.value.failures}</div>
+                <div className="col-span-2">{successRate.toFixed(1)}%</div>
+              </div>
+            );
+          })}
+
+          <div className="border-t border-[#14181c] px-6 py-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="tag">TEMPORAL · ROUTE HISTORY</div>
+              <div className="flex items-center gap-2">
+                <label className="font-mono text-[10px] tracking-[0.15em] text-zinc-500">
+                  CHANNEL
+                </label>
+                <select
+                  value={channelFilter}
+                  onChange={(event) => setChannelFilter(event.target.value as "ALL" | DistanceBridgeChannel)}
+                  className="border border-[#14181c] bg-black px-2 py-1 font-mono text-[10px] tracking-[0.12em] text-zinc-300"
+                >
+                  <option value="ALL">ALL</option>
+                  <option value="BLE">BLE</option>
+                  <option value="LoRa">LoRa</option>
+                  <option value="HCN_MESH">HCN_MESH</option>
+                  <option value="WEBRTC">WEBRTC</option>
+                </select>
+                <label className="ml-1 font-mono text-[10px] tracking-[0.15em] text-zinc-500">
+                  WINDOW
+                </label>
+                <select
+                  value={windowSize}
+                  onChange={(event) => setWindowSize(Number(event.target.value) as 12 | 24 | 40)}
+                  className="border border-[#14181c] bg-black px-2 py-1 font-mono text-[10px] tracking-[0.12em] text-zinc-300"
+                >
+                  <option value={12}>12</option>
+                  <option value={24}>24</option>
+                  <option value={40}>40</option>
+                </select>
+              </div>
+            </div>
+            {recentSamples.length === 0 ? (
+              <div className="font-mono text-[11px] text-zinc-500">
+                Sem eventos de roteamento ainda.
+              </div>
+            ) : (
+              <>
+                <div className="flex h-20 items-end gap-1">
+                  {recentSamples.map((sample, idx) => {
+                    const height = Math.min(100, 20 + sample.attemptsCount * 20);
+                    const color = sample.fallbackUsed
+                      ? "#ff6b6b"
+                      : sample.selected === "BLE"
+                        ? "#6cf0ff"
+                        : sample.selected === "LoRa"
+                          ? "#b6ff3a"
+                          : sample.selected === "HCN_MESH"
+                            ? "#ffd166"
+                            : "#ff3ad9";
+                    return (
+                      <div
+                        key={`${sample.timestamp}-${idx}`}
+                        className="group relative flex-1"
+                        title={`${sample.selected} · fallback=${sample.fallbackUsed ? "sim" : "não"} · tentativas=${sample.attemptsCount} · ${sample.durationMs.toFixed(1)}ms`}
+                      >
+                        <div
+                          className="w-full transition-opacity group-hover:opacity-80"
+                          style={{ height: `${height}%`, backgroundColor: color }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex justify-between font-mono text-[10px] tracking-[0.18em] text-zinc-600">
+                  <span>OLDEST</span>
+                  <span>NEWEST</span>
+                </div>
+                <div className="mt-4 border border-[#14181c] bg-black/60 px-3 py-3">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[10px] tracking-[0.15em] text-zinc-500">
+                    <span>ROLLING FALLBACK RATE (5)</span>
+                    <span>{fallbackTrend.at(-1)?.toFixed(1) ?? "0.0"}%</span>
+                  </div>
+                  <svg viewBox="0 0 100 100" className="h-14 w-full">
+                    <polyline
+                      fill="none"
+                      stroke="#2a3138"
+                      strokeWidth="1"
+                      points="0,0 100,0 100,100 0,100 0,0"
+                    />
+                    <path
+                      d={trendPath}
+                      fill="none"
+                      stroke="#ff6b6b"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* HCN feature */}
@@ -180,7 +398,7 @@ function CarrierMap() {
           const y = fromNode.y + (toNode.y - fromNode.y) * t.progress;
 
           return (
-            <g key={`${t.from}-${t.to}-${t.id}`}>
+            <g key={t.traceId}>
               <line 
                 x1={fromNode.x} y1={fromNode.y} x2={toNode.x} y2={toNode.y} 
                 stroke="#b6ff3a" strokeOpacity="0.2" strokeWidth="0.5"

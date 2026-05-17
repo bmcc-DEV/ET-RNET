@@ -1,0 +1,203 @@
+##############################################################################
+# ET-RNET — Stack Soberana de Produção
+#
+# Inclui:
+#   - bitcoind       lncm/bitcoind:v28.0            (nó Bitcoin)
+#   - lnd            lightninglabs/lnd:v0.18.3-beta (Lightning Daemon)
+#   - rtl            shahanafarooqui/rtl:v0.15.8    (UI + NWC bridge)
+#   - etrnet-server  node:22-alpine                 (servidor ET-RNET)
+#
+# PRIMEIRO USO (passo a passo):
+#
+#   Passo 1 — criar .env.sovereign com valores base:
+#     cp .env.sovereign.example .env.sovereign
+#     # editar BITCOIN_RPC_PASS e outros valores
+#
+#   Passo 2 — subir apenas bitcoind + LND (sem etrnet-server, que precisa do macaroon):
+#     docker compose -f docker-compose.sovereign.yml up -d bitcoind lnd rtl
+#
+#   Passo 3 — criar carteira LND (só na primeira vez):
+#     docker exec -it lnd lncli --network=regtest create
+#
+#   Passo 4 — obter o macaroon hex e colocar no .env.sovereign:
+#     docker exec lnd xxd -p -c 256 \
+#       /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+#       | tr -d '\n'
+#     # colar em LND_MACAROON_HEX= no .env.sovereign
+#
+#   Passo 5 — subir o servidor ET-RNET:
+#     docker compose -f docker-compose.sovereign.yml up -d etrnet-server
+#
+#   Passo 6 — ativar NWC no RTL:
+#     Abrir http://localhost:3000 → Settings → NWC → habilitar → copiar URI
+#
+# MAINNET:
+#   BITCOIN_NETWORK=mainnet docker compose -f docker-compose.sovereign.yml up -d
+##############################################################################
+
+name: etrnet-sovereign
+
+volumes:
+  bitcoin_data:
+  lnd_data:
+  rtl_data:
+
+networks:
+  void_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+services:
+
+  # ── Bitcoin Core ─────────────────────────────────────────────────────────────
+  bitcoind:
+    image: lncm/bitcoind:v27.2
+    container_name: bitcoind
+    restart: unless-stopped
+    volumes:
+      - bitcoin_data:/data/.bitcoin
+    networks:
+      void_net:
+        ipv4_address: 172.20.0.2
+    ports:
+      - "8332:8332"   # RPC (mainnet)
+      - "18332:18332" # RPC (testnet)
+      - "18443:18443" # RPC (regtest)
+      - "8333:8333"   # P2P (mainnet)
+    environment:
+      BITCOIN_NETWORK:   ${BITCOIN_NETWORK:-regtest}
+      BITCOIN_RPC_USER:  ${BITCOIN_RPC_USER:-void}
+      BITCOIN_RPC_PASS:  ${BITCOIN_RPC_PASS:-voidpassword}
+    # lncm/bitcoind já tem ENTRYPOINT=bitcoind — aqui vão apenas os flags
+    command: >
+      -regtest
+      -rpcuser=${BITCOIN_RPC_USER:-void}
+      -rpcpassword=${BITCOIN_RPC_PASS:-voidpassword}
+      -rpcallowip=172.20.0.0/24
+      -rpcbind=0.0.0.0
+      -zmqpubrawblock=tcp://0.0.0.0:28332
+      -zmqpubrawtx=tcp://0.0.0.0:28333
+      -txindex=1
+      -server=1
+      -rest=1
+    healthcheck:
+      # CMD-SHELL necessário para expandir variáveis de ambiente
+      test: ["CMD-SHELL",
+             "bitcoin-cli -regtest -rpcuser=$$BITCOIN_RPC_USER -rpcpassword=$$BITCOIN_RPC_PASS getblockchaininfo"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ── Lightning Network Daemon ──────────────────────────────────────────────────
+  lnd:
+    image: lightninglabs/lnd:v0.18.2-beta
+    container_name: lnd
+    restart: unless-stopped
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    volumes:
+      - lnd_data:/root/.lnd
+      - ./secrets:/secrets:ro
+    networks:
+      void_net:
+        ipv4_address: 172.20.0.3
+    ports:
+      - "9735:9735"   # P2P Lightning
+      - "8180:8080"   # REST API LND (8080 ocupado localmente → exposto em 8180)
+      - "10009:10009" # gRPC
+    environment:
+      BITCOIN_NETWORK:  ${BITCOIN_NETWORK:-regtest}
+      BITCOIN_RPC_USER: ${BITCOIN_RPC_USER:-void}
+      BITCOIN_RPC_PASS: ${BITCOIN_RPC_PASS:-voidpassword}
+      LND_ALIAS:        ${LND_ALIAS:-VOID-NODE}
+    # lightninglabs/lnd já tem ENTRYPOINT=lnd — aqui vão apenas os flags
+    command: >
+      --bitcoin.active
+      --bitcoin.regtest
+      --bitcoin.node=bitcoind
+      --bitcoind.rpchost=bitcoind:18443
+      --bitcoind.rpcuser=${BITCOIN_RPC_USER:-void}
+      --bitcoind.rpcpass=${BITCOIN_RPC_PASS:-voidpassword}
+      --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
+      --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
+      --restlisten=0.0.0.0:8080
+      --rpclisten=0.0.0.0:10009
+      --tlsextraip=0.0.0.0
+      --tlsextradomain=lnd
+      --accept-keysend
+      --accept-amp
+      --protocol.wumbo-channels
+      --maxpendingchannels=10
+      --alias=${LND_ALIAS:-VOID-NODE}
+      --color=#1a1a2e
+      --wallet-unlock-password-file=/secrets/wallet_password
+    healthcheck:
+      # Checa apenas se o daemon está escutando — lncli create vem depois
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10009 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ── Ride The Lightning (UI + NWC bridge) ──────────────────────────────────────
+  # RTL >= v0.15 inclui suporte nativo a NWC (Nostr Wallet Connect)
+  rtl:
+    image: shahanafarooqui/rtl:v0.15.8
+    container_name: rtl
+    restart: unless-stopped
+    depends_on:
+      lnd:
+        condition: service_healthy
+    volumes:
+      - lnd_data:/root/.lnd:ro
+      - rtl_data:/RTL
+      - ./config/rtl.json:/RTL/RTL-Config.json:ro
+    networks:
+      void_net:
+        ipv4_address: 172.20.0.4
+    ports:
+      - "3000:3000"
+    environment:
+      RTL_CONFIG_PATH: /RTL/RTL-Config.json
+      LND_SERVER_URL:  https://lnd:8080
+      MACAROON_PATH:   /root/.lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-regtest}/admin.macaroon
+
+  # ── ET-RNET Server (Node + LND REST) ─────────────────────────────────────────
+  # Requer LND_MACAROON_HEX no .env.sovereign — subir depois do Passo 4.
+  # Subir apenas este serviço: docker compose -f docker-compose.sovereign.yml up -d etrnet-server
+  etrnet-server:
+    image: node:22-alpine
+    container_name: etrnet-server
+    profiles: ["server"]  # não sobe com `up -d` sem --profile server
+    restart: unless-stopped
+    depends_on:
+      lnd:
+        condition: service_healthy
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - lnd_data:/root/.lnd:ro
+    networks:
+      void_net:
+        ipv4_address: 172.20.0.5
+    ports:
+      - "3001:3001"
+    environment:
+      PORT:             3001
+      LND_REST_URL:     https://lnd:8080
+      LND_MACAROON_HEX: ${LND_MACAROON_HEX}
+      LND_TLS_SKIP:     "true"   # LND usa TLS auto-assinado internamente
+      NWC_SECRET:       ${NWC_SECRET:-}
+      NODE_ENV:         production
+    command: >
+      sh -c "npm install --omit=dev && node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

@@ -44,3 +44,6 @@ coverage/
 # Misc
 .openclaude/
 *.tsbuildinfo
+
+# Doumentação
+DOC/secrets/

@@ -6,14 +6,31 @@
  */
 
 import { spawnGhostId, destroyGhostId, type GhostIdentity, type SpawnProgress } from "../crypto/ghostid";
-import { fragmentMessage, type Shard, type FragmentResult } from "../crypto/qel";
+import { fragmentMessage, type FragmentResult } from "../crypto/qel";
 import { HCNStore, type HCNShard } from "../storage/hcnStore";
 import { BluetoothDriver, NFCDriver, SerialUWBDriver } from "../network/localDrivers";
 import { LoRaDriver } from "../network/loraDriver";
 import { AcousticDriver } from "../network/acousticDriver";
 import { nostrMesh } from "../network/nostrMesh";
+import { DistanceBridge, type DistanceBridgeMetrics } from "../network/distanceBridge";
+import {
+  hybridEncrypt,
+  generateMLKEMKeypair, generateMLDSAKeypair,
+  mlDsaSign,
+  type PQCKeyPair,
+} from "../crypto/pqc";
 
 // === Novos motores: O Livro do ETRNET ===
+
+/** Resultado de envio com PQC (extensão de FragmentResult) */
+export interface PQCSendResult extends FragmentResult {
+  encapsulatedKey: Uint8Array;
+  nonce: Uint8Array;
+  tag: Uint8Array;
+  senderMLKEMPubKey: Uint8Array;
+  senderMLDSAPubKey: Uint8Array;
+  signature: Uint8Array;
+}
 
 export type VoidEvent =
 // ... (rest is same)
@@ -36,6 +53,11 @@ export class VoidOrchestrator {
   private hcnStore = new HCNStore();
   private listeners: Set<VoidListener> = new Set();
 
+  // PQC State (C3 — Criptografia de Malha Causal)
+  private pqcKeypair: PQCKeyPair | null = null;          // ML-KEM-1024
+  private pqcSigningKeypair: PQCKeyPair | null = null;   // ML-DSA-87
+  private knownRecipientKeys: Map<string, Uint8Array> = new Map();
+
   // Drivers
   public readonly ble = new BluetoothDriver();
   public readonly nfc = new NFCDriver();
@@ -45,6 +67,13 @@ export class VoidOrchestrator {
 
   // Cross-Tab Mesh (Real Peer Simulation)
   private meshChannel = new BroadcastChannel("void_omega_mesh");
+  private distanceBridge = new DistanceBridge({
+    ble: this.ble,
+    lora: this.lora,
+    meshChannel: this.meshChannel,
+    broadcastWebRTC: (shard) => nostrMesh.broadcastShard(shard),
+    meshSender: () => this.identity?.handle || "anon_node",
+  });
 
   private constructor() {
     this.initNetworkListeners();
@@ -89,6 +118,11 @@ export class VoidOrchestrator {
   public async spawn(onProgress?: (p: SpawnProgress) => void): Promise<GhostIdentity> {
     const id = await spawnGhostId(onProgress);
     this.identity = id;
+
+    // Inicializar chaves Pós-Quânticas (C3)
+    this.pqcKeypair = generateMLKEMKeypair();
+    this.pqcSigningKeypair = generateMLDSAKeypair();
+
     this.notify({ type: "GHOST_SPAWNED", identity: id });
     return id;
   }
@@ -97,26 +131,98 @@ export class VoidOrchestrator {
     if (this.identity) {
       destroyGhostId(this.identity);
       this.identity = null;
+      // Zero PQC keys
+      if (this.pqcKeypair) {
+        this.pqcKeypair.publicKey.fill(0);
+        this.pqcKeypair.privateKey.fill(0);
+        this.pqcKeypair = null;
+      }
+      if (this.pqcSigningKeypair) {
+        this.pqcSigningKeypair.publicKey.fill(0);
+        this.pqcSigningKeypair.privateKey.fill(0);
+        this.pqcSigningKeypair = null;
+      }
+      this.knownRecipientKeys.clear();
       this.notify({ type: "GHOST_DESTROYED" });
     }
+  }
+
+  /** Registra a chave ML-KEM pública de um destinatário conhecido. */
+  public registerRecipientKey(handle: string, publicKey: Uint8Array): void {
+    this.knownRecipientKeys.set(handle, publicKey);
+  }
+
+  /** Retorna a chave ML-KEM pública do próprio nó (para compartilhar). */
+  public getMLKEMPublicKey(): Uint8Array | null {
+    return this.pqcKeypair?.publicKey ?? null;
+  }
+
+  /** Retorna a chave ML-DSA pública do próprio nó (para verificação). */
+  public getMLDSAPublicKey(): Uint8Array | null {
+    return this.pqcSigningKeypair?.publicKey ?? null;
   }
 
   // --- Messaging & Routing ---
 
   /**
    * Envia uma mensagem fragmentada através dos melhores canais disponíveis.
+   * Se recipientMLKEMPubKey for fornecido, aplica criptografia Pós-Quântica (C3)
+   * antes da fragmentação Shamir.
    */
-  public async send(message: string): Promise<FragmentResult> {
+  public async send(
+    message: string,
+    recipientMLKEMPubKey?: Uint8Array,
+  ): Promise<FragmentResult | PQCSendResult> {
     if (!this.identity) throw new Error("GHOSTID_REQUIRED");
 
-    const result = fragmentMessage(message);
-    
-    // Roteamento inteligente: distribui shards por canais
-    // Em uma implementação futura, isso consideraria latência e carga.
+    let dataToFragment: string;
+    let pqcMeta: Pick<PQCSendResult, "encapsulatedKey" | "nonce" | "tag" | "senderMLKEMPubKey" | "senderMLDSAPubKey" | "signature"> | null = null;
+
+    if (recipientMLKEMPubKey && this.pqcKeypair && this.pqcSigningKeypair) {
+      // C3: Criptografia Pós-Quântica antes de fragmentar
+      const plaintext = new TextEncoder().encode(message);
+
+      // Assinar payload com ML-DSA-87
+      const pqcSig = mlDsaSign(this.pqcSigningKeypair.privateKey, plaintext);
+
+      // Encriptar com ML-KEM + ChaCha20-Poly1305
+      const encrypted = hybridEncrypt(recipientMLKEMPubKey, plaintext);
+
+      // Conversão chunked para evitar stack overflow em mensagens grandes
+      let binary = "";
+      const chunk = 8192;
+      for (let i = 0; i < encrypted.ciphertext.length; i += chunk) {
+        binary += String.fromCharCode(...encrypted.ciphertext.subarray(i, i + chunk));
+      }
+      dataToFragment = btoa(binary);
+
+      pqcMeta = {
+        encapsulatedKey: encrypted.encapsulatedKey,
+        nonce: encrypted.nonce,
+        tag: encrypted.tag,
+        senderMLKEMPubKey: this.pqcKeypair.publicKey,
+        senderMLDSAPubKey: this.pqcSigningKeypair.publicKey,
+        signature: pqcSig.signature,
+      };
+    } else {
+      // Compatibilidade: envio sem PQC (plaintext Shamir)
+      dataToFragment = message;
+    }
+
+    const result = fragmentMessage(dataToFragment);
+
+    // Roteamento inteligente: distribui shards por canais com fallback
     for (let i = 0; i < result.shards.length; i++) {
       const shard = result.shards[i];
-      const channel = this.determineBestChannel(i);
-      
+      if (!shard) continue;
+      const route = await this.distanceBridge.routeShard(shard, i);
+      const channel = route.channel;
+      if (route.fallbackUsed) {
+        console.warn(
+          `[Orchestrator] Fallback de transporte: preferido=${route.preferred} escolhido=${route.channel} tentativas=${route.attempted.join("->")}`,
+        );
+      }
+
       // Store in local HCN for relay (Carrier logic)
       await this.hcnStore.storeShard({
         commitment: shard.commitment,
@@ -125,46 +231,13 @@ export class VoidOrchestrator {
       });
 
       this.notify({ type: "SHARD_SENT", commitment: shard.commitment, channel });
-      
-      // Attempt physical transmission if driver is active
-      this.transmitShard(shard, channel);
+    }
+
+    if (pqcMeta) {
+      return { ...result, ...pqcMeta };
     }
 
     return result;
-  }
-
-  private determineBestChannel(index: number): string {
-    const channels = ["BLE", "LoRa", "HCN_MESH", "WEBRTC"];
-    return channels[index % channels.length];
-  }
-
-  private async transmitShard(shard: Shard, channel: string) {
-    console.log(`[Orchestrator] Transmitindo shard ${shard.commitment} via ${channel}`);
-    
-    try {
-      if (channel === "WEBRTC") {
-        nostrMesh.broadcastShard(shard);
-      }
-      
-      // Real Cross-Tab Transmission
-      if (channel === "HCN_MESH") {
-        this.meshChannel.postMessage({
-          type: "SHARD_BROADCAST",
-          payload: shard,
-          sender: this.identity?.handle || "anon_node"
-        });
-      }
-
-      if (channel === "BLE" && this.ble.isSupported()) {
-        // Exemplo: broadcasting shard via BLE (mocked in driver)
-        await this.ble.startAdvertising(shard.data);
-      } else if (channel === "LoRa" && this.lora.isSupported()) {
-        // Envia via rádio (0 = broadcast)
-        await this.lora.sendData(0, btoa(JSON.stringify(shard)));
-      }
-    } catch (err) {
-      console.warn(`[Orchestrator] Falha na transmissão física via ${channel}:`, err);
-    }
   }
 
   // --- Network Event Loop ---
@@ -214,6 +287,20 @@ export class VoidOrchestrator {
   public subscribe(listener: VoidListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Retorna métricas agregadas do DistanceBridge.
+   */
+  public getTransportMetrics(): DistanceBridgeMetrics {
+    return this.distanceBridge.getMetrics();
+  }
+
+  /**
+   * Reseta métricas de transporte (útil para benchmark/sessão).
+   */
+  public resetTransportMetrics(): void {
+    this.distanceBridge.resetMetrics();
   }
 
   private notify(event: VoidEvent) {

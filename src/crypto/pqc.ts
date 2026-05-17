@@ -71,7 +71,7 @@ export function mlkemDecapsulate(
   privateKey: Uint8Array,
   ciphertext: Uint8Array,
 ): Uint8Array {
-  return ml_kem1024.decapsulate(privateKey, ciphertext);
+  return ml_kem1024.decapsulate(ciphertext, privateKey);
 }
 
 // ─── ML-DSA-87 (Dilithium) — Digital Signatures ──────────────────────────────
@@ -94,7 +94,7 @@ export function generateMLDSAKeypair(): PQCKeyPair {
  * Assina uma mensagem usando ML-DSA-87.
  */
 export function mlDsaSign(privateKey: Uint8Array, message: Uint8Array): PQCSignature {
-  const signature = ml_dsa87.sign(privateKey, message);
+  const signature = ml_dsa87.sign(message, privateKey);
   return { signature, algorithm: "ML-DSA-87" };
 }
 
@@ -107,7 +107,7 @@ export function mlDsaVerify(
   signature: Uint8Array,
 ): boolean {
   try {
-    return ml_dsa87.verify(publicKey, message, signature);
+    return ml_dsa87.verify(signature, message, publicKey);
   } catch {
     return false;
   }

@@ -1,26 +1,19 @@
 /**
- * VØID-LN — LDK Bridge (TypeScript → WASM)
+ * VØID-LN — LDK Bridge (LND REST API Client)
  *
- * Wrapper TypeScript para o LDK-WASM. Gerencia o ciclo de vida
- * do nó Lightning no browser: inicialização, canais, invoices,
- * pagamentos, persistência.
+ * Conecta ao nó Lightning próprio via LND REST API (HTTPS + Macaroon).
+ * Substitui o stub `declare class LDKNode` por chamadas reais ao LND.
  *
- * Chaves privadas nunca saem do WASM/OPFS.
+ * Configuração:
+ *   ldkBridge.configure("https://lnd.seu-no.com:8080", "macaroon_hex_aqui");
+ *
+ * Quando não configurado opera em modo stub e lança erros descritivos.
+ * Chaves privadas permanecem no nó LND — nunca no browser.
+ *
+ * Referência: https://lightning.engineering/api-docs/api/lnd/
  */
 
 import { channelStore } from "../storage/channelStore";
-
-// LDKNode will be available from void_core after WASM build
-// For now, use a type-safe stub
-declare class LDKNode {
-  constructor(seed: Uint8Array, logFn?: Function, persistFn?: Function);
-  initialize(seed: Uint8Array, network: string): void;
-  getNodePubkey(): Uint8Array;
-  createInvoice(amountMsats: number, description: string, expirySecs: number): string;
-  processMessage(peerPubkey: Uint8Array, message: Uint8Array): Uint8Array;
-  serializeState(): Uint8Array;
-  getChannelCount(): number;
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,8 +37,19 @@ export interface LDKInvoice {
 
 export interface LDKPaymentResult {
   success: boolean;
-  preimage?: string;
-  error?: string;
+  preimage: string | undefined;
+  feeMsats: number | undefined;
+  error: string | undefined;
+}
+
+export interface LDKNodeInfo {
+  pubkey: string;
+  alias: string;
+  network: string;
+  blockHeight: number;
+  synced: boolean;
+  numActiveChannels: number;
+  numPeers: number;
 }
 
 export type LDKEventType =
@@ -60,140 +64,451 @@ export type LDKEventType =
 
 export interface LDKEvent {
   type: LDKEventType;
-  channelId?: string;
-  paymentHash?: string;
-  preimage?: string;
-  amountMsats?: number;
-  error?: string;
+  channelId: string | undefined;
+  paymentHash: string | undefined;
+  preimage: string | undefined;
+  amountMsats: number | undefined;
+  error: string | undefined;
 }
 
 export type LDKEventListener = (event: LDKEvent) => void;
 
+interface LNDConfig {
+  restUrl: string;   // ex: "https://127.0.0.1:8080"
+  macaroon: string;  // hex-encoded invoice/admin macaroon
+}
+
+// ─── LND REST helpers ─────────────────────────────────────────────────────────
+
+async function lndFetch<T>(
+  config: LNDConfig,
+  path: string,
+  opts: RequestInit = {},
+): Promise<T> {
+  const url = `${config.restUrl}${path}`;
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      "Grpc-Metadata-Macaroon": config.macaroon,
+      "Content-Type": "application/json",
+      ...(opts.headers ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`LND REST ${path} → HTTP ${res.status}: ${body}`);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+function hexToBase64(hex: string): string {
+  const bytes = new Uint8Array(hex.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
+  return btoa(String.fromCharCode(...bytes));
+}
+
 // ─── LDK Bridge ──────────────────────────────────────────────────────────────
 
 export class LDKBridge {
-  private node: LDKNode | null = null;
+  private config: LNDConfig | null = null;
   private initialized = false;
   private listeners: Set<LDKEventListener> = new Set();
+  private subscriptionController: AbortController | null = null;
+
   /**
-   * Inicializa o nó LDK com a seed do usuário.
-   * A seed é armazenada apenas no WASM (nunca no JS heap).
+   * Configura o bridge com a URL e macaroon do nó LND.
+   * Substitui o antigo `init(seed)` — aqui as chaves ficam no nó, nunca no browser.
    */
-  async init(seed: Uint8Array, network: "mainnet" | "testnet" | "regtest" = "regtest"): Promise<void> {
-    if (seed.length !== 32) throw new Error("Seed must be 32 bytes");
-
-    // Seed goes directly to WASM — never stored in JS heap
-
-    // Create LDK node with JS callbacks for logging and persistence
-    this.node = new LDKNode(
-      seed,
-      (msg: string) => console.log(msg),
-      (action: string, channelId: string, data: Uint8Array) => {
-        this.handlePersist(action, channelId, data);
-      },
-    );
-
-    // Initialize with network
-    this.node.initialize(seed, network);
-
+  configure(lndRestUrl: string, macaroonHex: string): void {
+    this.config = {
+      restUrl: lndRestUrl.replace(/\/$/, ""),
+      macaroon: macaroonHex.trim(),
+    };
     this.initialized = true;
-    console.log(`[LDK] Node initialized on ${network}`);
+    console.log(`[LDK] Configurado: ${this.config.restUrl}`);
   }
 
   /**
-   * Retorna a pubkey do nó Lightning.
+   * Mantém compatibilidade com a API antiga (seed ignorada — chaves ficam no LND).
+   * @deprecated Use configure(url, macaroon) em produção.
    */
-  getNodePubkey(): string | null {
-    if (!this.node) return null;
-    try {
-      const pubkey = this.node.getNodePubkey();
-      return Array.from(pubkey).map(b => b.toString(16).padStart(2, "0")).join("");
-    } catch {
-      return null;
+  async init(_seed: Uint8Array, _network: string = "regtest"): Promise<void> {
+    if (!this.config) {
+      console.warn(
+        "[LDK] init() chamado sem configure(). " +
+        "Defina LND_REST_URL e LND_MACAROON_HEX e chame configure() primeiro.",
+      );
     }
   }
 
-  /**
-   * Cria uma invoice BOLT11 para receber pagamento.
-   */
-  async createInvoice(amountMsats: number, description: string, expirySecs: number = 3600): Promise<LDKInvoice> {
-    if (!this.node || !this.initialized) throw new Error("LDK not initialized");
+  private assertConfigured(): LNDConfig {
+    if (!this.config) {
+      throw new Error(
+        "LDK Bridge não configurado. " +
+        "Chame ldkBridge.configure(lndUrl, macaroonHex) antes de usar.",
+      );
+    }
+    return this.config;
+  }
 
-    const _bolt11 = this.node.createInvoice(amountMsats, description, expirySecs);
+  // ─── Informações do nó ─────────────────────────────────────────────────────
+
+  /**
+   * Retorna informações do nó LND (getinfo).
+   */
+  async getNodeInfo(): Promise<LDKNodeInfo> {
+    const cfg = this.assertConfigured();
+    const info = await lndFetch<{
+      identity_pubkey: string;
+      alias: string;
+      chains: Array<{ network: string }>;
+      block_height: number;
+      synced_to_chain: boolean;
+      num_active_channels: number;
+      num_peers: number;
+    }>(cfg, "/v1/getinfo");
 
     return {
-      bolt11: _bolt11,
-      paymentHash: "", // Derived from invoice
-      amountMsats,
-      description,
-      expiresAt: Math.floor(Date.now() / 1000) + expirySecs,
+      pubkey:            info.identity_pubkey,
+      alias:             info.alias,
+      network:           info.chains[0]?.network ?? "unknown",
+      blockHeight:       info.block_height,
+      synced:            info.synced_to_chain,
+      numActiveChannels: info.num_active_channels,
+      numPeers:          info.num_peers,
     };
   }
 
   /**
-   * Paga uma invoice BOLT11.
+   * Retorna a pubkey do nó Lightning (hex).
    */
-  async payInvoice(_bolt11: string): Promise<LDKPaymentResult> {
-    if (!this.node || !this.initialized) throw new Error("LDK not initialized");
-
-    try {
-      // TODO: Parse invoice and route payment through channel manager
-      return { success: false, error: "Payment routing not yet implemented" };
-    } catch (err: any) {
-      return { success: false, error: err.message };
-    }
+  getNodePubkey(): string | null {
+    return null; // use getNodeInfo() para pubkey real
   }
 
-  /**
-   * Processa uma mensagem Lightning recebida via NOSTR transport.
-   */
-  processMessage(peerPubkey: Uint8Array, message: Uint8Array): Uint8Array | null {
-    if (!this.node || !this.initialized) return null;
-
+  async fetchNodePubkey(): Promise<string | null> {
     try {
-      return this.node.processMessage(peerPubkey, message);
+      const info = await this.getNodeInfo();
+      return info.pubkey;
     } catch {
       return null;
     }
   }
 
+  // ─── Canais ────────────────────────────────────────────────────────────────
+
   /**
-   * Retorna o número de canais ativos.
+   * Lista canais Lightning ativos.
    */
-  getChannelCount(): number {
-    return this.node?.getChannelCount() ?? 0;
+  async listChannels(): Promise<LDKChannel[]> {
+    const cfg = this.assertConfigured();
+    const data = await lndFetch<{
+      channels: Array<{
+        channel_point: string;
+        remote_pubkey: string;
+        capacity: string;
+        local_balance: string;
+        remote_balance: string;
+        active: boolean;
+        private: boolean;
+      }>;
+    }>(cfg, "/v1/channels");
+
+    return (data.channels ?? []).map(ch => ({
+      channelId:        ch.channel_point,
+      peerPubkey:       ch.remote_pubkey,
+      capacitySat:      parseInt(ch.capacity, 10),
+      localBalanceSat:  parseInt(ch.local_balance, 10),
+      remoteBalanceSat: parseInt(ch.remote_balance, 10),
+      isActive:         ch.active,
+      isPublic:         !ch.private,
+    }));
   }
 
   /**
-   * Registra listener para eventos LDK.
+   * Número de canais ativos (compatibilidade com API antiga).
    */
+  getChannelCount(): number {
+    return 0; // use listChannels() para contagem real
+  }
+
+  /**
+   * Abre um canal com um peer.
+   */
+  async openChannel(
+    peerPubkey: string,
+    localSat: number,
+    pushSat = 0,
+    isPrivate = false,
+  ): Promise<{ fundingTxid: string; outputIndex: number }> {
+    const cfg = this.assertConfigured();
+    const res = await lndFetch<{ funding_txid_bytes: string; output_index: number }>(
+      cfg,
+      "/v1/channels",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          node_pubkey_string: peerPubkey,
+          local_funding_amount: localSat.toString(),
+          push_sat: pushSat.toString(),
+          private: isPrivate,
+          spend_unconfirmed: false,
+        }),
+      },
+    );
+
+    await this.persistChannelEvent("channel_opened", peerPubkey, {
+      fundingTxid:   res.funding_txid_bytes,
+      outputIndex:   res.output_index,
+      localSat,
+      pushSat,
+    });
+
+    return {
+      fundingTxid:  res.funding_txid_bytes,
+      outputIndex:  res.output_index,
+    };
+  }
+
+  /**
+   * Fecha um canal.
+   */
+  async closeChannel(
+    channelPoint: string,
+    force = false,
+  ): Promise<void> {
+    const cfg = this.assertConfigured();
+    const [txid, outputIndex] = channelPoint.split(":");
+    const path = `/v1/channels/${txid}/${outputIndex}?force=${force}`;
+    await lndFetch(cfg, path, { method: "DELETE" });
+    console.log(`[LDK] Canal fechado: ${channelPoint}`);
+  }
+
+  // ─── Invoices / Pagamentos ─────────────────────────────────────────────────
+
+  /**
+   * Cria uma invoice BOLT11 real via LND.
+   */
+  async createInvoice(
+    amountMsats: number,
+    description: string,
+    expirySecs = 3600,
+  ): Promise<LDKInvoice> {
+    const cfg = this.assertConfigured();
+    const res = await lndFetch<{
+      payment_request: string;
+      r_hash: string;
+      add_index: string;
+    }>(cfg, "/v1/invoices", {
+      method: "POST",
+      body: JSON.stringify({
+        value_msat:  amountMsats.toString(),
+        memo:        description,
+        expiry:      expirySecs.toString(),
+      }),
+    });
+
+    return {
+      bolt11:       res.payment_request,
+      paymentHash:  res.r_hash,
+      amountMsats,
+      description,
+      expiresAt:    Math.floor(Date.now() / 1000) + expirySecs,
+    };
+  }
+
+  /**
+   * Paga uma invoice BOLT11 real via LND.
+   */
+  async payInvoice(
+    bolt11: string,
+    maxFeeSat = 10,
+  ): Promise<LDKPaymentResult> {
+    const cfg = this.assertConfigured();
+    try {
+      const res = await lndFetch<{
+        payment_preimage?: string;
+        payment_error?: string;
+        fee_sat?: string;
+      }>(cfg, "/v1/channels/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          payment_request: bolt11,
+          fee_limit: { fixed: maxFeeSat.toString() },
+        }),
+      });
+
+      if (res.payment_error && res.payment_error !== "") {
+        return { success: false, error: res.payment_error, preimage: undefined, feeMsats: undefined };
+      }
+
+      const preimageHex = res.payment_preimage
+        ? hexToBase64(res.payment_preimage)
+        : undefined;
+
+      this.emit({
+        type:        "payment_sent",
+        preimage:    preimageHex ?? undefined,
+        amountMsats: undefined,
+        channelId:   undefined,
+        paymentHash: undefined,
+        error:       undefined,
+      });
+
+      return {
+        success:   true,
+        preimage:  preimageHex ?? undefined,
+        feeMsats:  res.fee_sat ? parseInt(res.fee_sat, 10) * 1000 : undefined,
+        error:     undefined,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit({ type: "payment_failed", error: msg, preimage: undefined, amountMsats: undefined, channelId: undefined, paymentHash: undefined });
+      return { success: false, error: msg, preimage: undefined, feeMsats: undefined };
+    }
+  }
+
+  /**
+   * Consulta o status de uma invoice pelo payment hash (hex ou base64).
+   */
+  async lookupInvoice(rHashHex: string): Promise<{
+    settled: boolean;
+    amountMsats: number;
+    settledAt?: number;
+  }> {
+    const cfg = this.assertConfigured();
+    const b64 = hexToBase64(rHashHex);
+    const encoded = encodeURIComponent(b64);
+    const res = await lndFetch<{
+      settled: boolean;
+      value_msat: string;
+      settle_date: string;
+    }>(cfg, `/v1/invoice/${encoded}`);
+
+    const settledAt = res.settled ? parseInt(res.settle_date, 10) : undefined;
+    return {
+      settled:    res.settled,
+      amountMsats: parseInt(res.value_msat, 10),
+      ...(settledAt !== undefined ? { settledAt } : {}),
+    };
+  }
+
+  /**
+   * Saldo disponível nos canais (local + remote).
+   */
+  async getChannelBalance(): Promise<{ localSat: number; remoteSat: number }> {
+    const cfg = this.assertConfigured();
+    const res = await lndFetch<{
+      local_balance: { sat: string };
+      remote_balance: { sat: string };
+    }>(cfg, "/v1/balance/channels");
+    return {
+      localSat:  parseInt(res.local_balance?.sat ?? "0", 10),
+      remoteSat: parseInt(res.remote_balance?.sat ?? "0", 10),
+    };
+  }
+
+  // ─── Eventos / SSE ────────────────────────────────────────────────────────
+
+  /**
+   * Inscreve em atualizações de invoice via Server-Sent Events (LND /v1/invoices/subscribe).
+   * Notifica listeners quando uma invoice for paga.
+   */
+  subscribeToInvoices(): void {
+    if (!this.config || this.subscriptionController) return;
+
+    this.subscriptionController = new AbortController();
+    const { signal } = this.subscriptionController;
+    const cfg = this.config;
+
+    fetch(`${cfg.restUrl}/v1/invoices/subscribe`, {
+      headers: { "Grpc-Metadata-Macaroon": cfg.macaroon },
+      signal,
+    }).then(async (res) => {
+      if (!res.body) return;
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || signal.aborted) break;
+        try {
+          const line = dec.decode(value).trim();
+          if (!line.startsWith("{")) continue;
+          const data = JSON.parse(line) as {
+            result?: { settled?: boolean; r_preimage?: string; value_msat?: string };
+          };
+          if (data.result?.settled) {
+            this.emit({
+              type:        "payment_received",
+              preimage:    data.result.r_preimage ?? undefined,
+              amountMsats: data.result.value_msat
+                ? parseInt(data.result.value_msat, 10)
+                : undefined,
+              channelId:   undefined,
+              paymentHash: undefined,
+              error:       undefined,
+            });
+          }
+        } catch { /* parse error — ignora */ }
+      }
+    }).catch((err) => {
+      if (!signal.aborted) {
+        console.warn("[LDK] Invoice subscription error:", err);
+      }
+    });
+  }
+
+  unsubscribe(): void {
+    this.subscriptionController?.abort();
+    this.subscriptionController = null;
+  }
+
+  // ─── Listeners ─────────────────────────────────────────────────────────────
+
   onEvent(listener: LDKEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  /**
-   * Verifica se está inicializado.
-   */
+  private emit(event: LDKEvent): void {
+    for (const l of this.listeners) {
+      try { l(event); } catch { /* ignore */ }
+    }
+  }
+
   isInitialized(): boolean {
     return this.initialized;
   }
 
-  // ─── Internal ──────────────────────────────────────────────────────────
+  isConfigured(): boolean {
+    return this.config !== null;
+  }
 
-  private async handlePersist(action: string, channelId: string, data: Uint8Array): Promise<void> {
-    // Persist channel state in IndexedDB via channelStore (não localStorage — 5MB limit)
+  // ─── Persistência de estado de canal ──────────────────────────────────────
+
+  private async persistChannelEvent(
+    action: string,
+    channelId: string,
+    data: object,
+  ): Promise<void> {
     try {
+      const encoded = new TextEncoder().encode(JSON.stringify(data));
       await channelStore.saveMonitor({
-        id: channelId,
-        data,
+        id:        channelId,
+        data:      encoded,
         updatedAt: Date.now(),
         channelId,
       });
-      console.log(`[LDK] Persisted ${action} for channel ${channelId.slice(0, 8)}... (${data.length} bytes)`);
+      console.log(`[LDK] Persistido ${action} para ${channelId.slice(0, 8)}...`);
     } catch (err) {
-      console.warn(`[LDK] Failed to persist ${action}:`, err);
+      console.warn(`[LDK] Falha ao persistir ${action}:`, err);
     }
+  }
+
+  /** @deprecated use subscribeToInvoices() + onEvent() */
+  processMessage(_peerPubkey: Uint8Array, _message: Uint8Array): Uint8Array | null {
+    return null;
   }
 }
 

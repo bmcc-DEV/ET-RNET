@@ -39,15 +39,15 @@ export function getSigningKey(namespace: string): Uint8Array {
   if (cached) return cached;
 
   // Usa o segredo da identidade do nó (ou gera um efêmero)
+  // sessionStorage: zero rastro — destruído ao fechar a aba
   let nodeSecret: Uint8Array;
   try {
-    // Tenta usar a chave do GhostID se disponível
-    const stored = localStorage.getItem("void_node_secret");
+    const stored = sessionStorage.getItem("void_node_secret");
     if (stored) {
       nodeSecret = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
     } else {
       nodeSecret = crypto.getRandomValues(new Uint8Array(32));
-      localStorage.setItem("void_node_secret", btoa(String.fromCharCode(...nodeSecret)));
+      sessionStorage.setItem("void_node_secret", btoa(String.fromCharCode(...nodeSecret)));
     }
   } catch {
     nodeSecret = crypto.getRandomValues(new Uint8Array(32));

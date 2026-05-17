@@ -8,6 +8,8 @@
  * Chaves privadas nunca saem do WASM/OPFS.
  */
 
+import { channelStore } from "../storage/channelStore";
+
 // LDKNode will be available from void_core after WASM build
 // For now, use a type-safe stub
 declare class LDKNode {
@@ -179,13 +181,16 @@ export class LDKBridge {
 
   // ─── Internal ──────────────────────────────────────────────────────────
 
-  private handlePersist(action: string, channelId: string, data: Uint8Array): void {
-    // Store channel state in IndexedDB
+  private async handlePersist(action: string, channelId: string, data: Uint8Array): Promise<void> {
+    // Persist channel state in IndexedDB via channelStore (não localStorage — 5MB limit)
     try {
-      const key = `ldk_channel_${channelId}`;
-      const encoded = btoa(String.fromCharCode(...data));
-      localStorage.setItem(key, encoded);
-      console.log(`[LDK] Persisted ${action} for channel ${channelId.slice(0, 8)}...`);
+      await channelStore.saveMonitor({
+        id: channelId,
+        data,
+        updatedAt: Date.now(),
+        channelId,
+      });
+      console.log(`[LDK] Persisted ${action} for channel ${channelId.slice(0, 8)}... (${data.length} bytes)`);
     } catch (err) {
       console.warn(`[LDK] Failed to persist ${action}:`, err);
     }

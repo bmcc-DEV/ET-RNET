@@ -20,6 +20,7 @@
     "build:wasm:dev": "cd void_core && wasm-pack build --target web --out-dir pkg --dev"
   },
   "dependencies": {
+    "@capacitor-community/bluetooth-le": "^8.1.3",
     "@capacitor/android": "^8.3.3",
     "@capacitor/core": "^8.3.3",
     "@noble/ciphers": "^2.2.0",
@@ -38,14 +39,14 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.3",
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
-    "hardhat": "^2.22.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "hardhat": "^2.22.0",
     "jsdom": "^26.1.0",
     "tailwindcss": "4.1.17",
     "terser": "^5.47.1",

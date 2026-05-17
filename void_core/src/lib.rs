@@ -1,4 +1,4 @@
-mod ldk;
+// mod ldk; // TODO: habilitar quando LDK crate APIs estabilizarem (lightning 0.1.x)
 
 use wasm_bindgen::prelude::*;
 use curve25519_dalek::scalar::Scalar;

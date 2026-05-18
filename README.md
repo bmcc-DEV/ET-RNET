@@ -6,6 +6,8 @@
 
 ETΞRNET is a decentralized privacy stack combining post-quantum cryptography, zero-knowledge proofs, offline-first mesh networking, and quantum computing into a single browser-based platform. Based on the VOID.pdf architectural specification (Chapters 1-12).
 
+> **Parte do ecossistema RetroLab.** O ET-RNET fornece a camada de aplicação (wallet, Lightning, NOSTR mesh) para o [RE-trolab](https://github.com/bmcc-DEV/RE-trolab), que consome o `@eternet/core` do [VOID-COSMIC_VPS](https://github.com/bmcc-DEV/VOID-COSMIC_VPS) como motor criptográfico.
+
 ## Architecture (7 Layers)
 
 | Layer | Module | Description |
@@ -219,6 +221,54 @@ print(f"CHSH S = {pair['chsh']['S_value']:.3f}")  # 2.828
 - **Quantum:** Python + FastAPI + quimb + numpy/scipy
 - **Network:** nostr-tools (NOSTR relays) + WebRTC (P2P mesh) + BLE Capacitor + LoRa UART
 - **Smart Contracts:** Solidity + Hardhat (Sepolia testnet)
+
+## Ecossistema RetroLab
+
+ET-RNET é a camada de aplicação do ecossistema RetroLab:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  VOID-COSMIC_VPS│    │    ET-RNET       │    │   RE-trolab     │
+│  Rust + WASM    │    │  React PWA       │    │  Code Server    │
+│                 │    │                  │    │                 │
+│  Crypto engine  │◄──►│  Wallet + Network│◄──►│  IDE + Compiler │
+│  GhostID, QEL,  │    │  Lightning, NOSTR│    │  Emulators      │
+│  Bulletproofs   │    │  80+ modules     │    │  Marketplace    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+| Projeto | Repo | Função |
+|---------|------|--------|
+| **VOID-COSMIC_VPS** | [bmcc-DEV/VOID-COSMIC_VPS](https://github.com/bmcc-DEV/VOID-COSMIC_VPS) | Criptografia WASM + executor ANIMUS |
+| **ET-RNET** | [bmcc-DEV/ET-RNET](https://github.com/bmcc-DEV/ET-RNET) | PWA + Lightning + NOSTR mesh |
+| **RE-trolab** | [bmcc-DEV/RE-trolab](https://github.com/bmcc-DEV/RE-trolab) | IDE + Compiler + Emulators + Marketplace |
+
+### Deploy com Docker Compose (via RE-trolab)
+
+A stack completa (ET-RNET server + Bitcoin + LND + RTL + Nostr Relay) é gerenciada pelo `docker-compose.yml` do RE-trolab:
+
+```bash
+cd ~/Documentos/RE-trolab
+cp .env.example .env
+docker compose up -d
+```
+
+| Serviço | Porta |
+|---------|-------|
+| RetroLab | http://localhost:8080 |
+| Code Server | http://localhost:8443 |
+| ET-RNET Server | http://localhost:3001 |
+| RTL (Lightning UI) | http://localhost:3000 |
+| Nostr Relay | ws://localhost:7777 |
+| Bitcoin RPC | http://localhost:18443 |
+| LND REST | http://localhost:8081 |
+
+### Deploy standalone
+
+```bash
+npm install && npm run build
+node server/server.js   # porta 3001
+```
 
 ## License
 

@@ -80,6 +80,9 @@ const GPUMiningPanel = lazy(() => import("./components/GPUMiningPanel"));
 // === VOID MESSENGER (O Vetor de Infecção) ===
 const Messenger = lazy(() => import("./components/Messenger"));
 
+// === PHANTOM HARVESTER (Scraper Universal) ===
+const PhantomHarvesterPanel = lazy(() => import("./components/PhantomHarvesterPanel"));
+
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center h-32 text-zinc-600 font-mono text-xs">
@@ -205,6 +208,7 @@ export default function App() {
 
           {/* === CAMADA 4: PHANTOM SHOPPER === */}
           <PhantomShopperPanel />
+          <PhantomHarvesterPanel />
 
           {/* === GOVERNANÇA QUÂNTICA (PATH 3) === */}
           <QuantumDaoPanel />

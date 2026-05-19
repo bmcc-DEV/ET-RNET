@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, lazy } from "react";
+import { Router, Route, Switch } from "wouter";
 import { nativeBridge } from "./network/NativeBridge";
+import AppLayout from "./layouts/AppLayout";
 
-// Eager imports — lightweight/above-the-fold
+// Eager imports — landing page (above-the-fold)
 import Nav from "./components/Nav";
 import Hero from "./components/Hero";
 import Marquee from "./components/Marquee";
@@ -12,7 +14,7 @@ import Roadmap from "./components/Roadmap";
 import Manifesto from "./components/Manifesto";
 import Footer from "./components/Footer";
 
-// Lazy imports — heavy interactive panels
+// Lazy imports — heavy panels (loaded on demand by router)
 const EternetDashboard = lazy(() => import("./components/EternetDashboard"));
 const ActiveTerminal = lazy(() => import("./components/ActiveTerminal"));
 const CoreInnovations = lazy(() => import("./components/CoreInnovations"));
@@ -41,8 +43,6 @@ const SocialFabricPanel = lazy(() => import("./components/SocialFabricPanel"));
 const CryptoTestamentLab = lazy(() => import("./components/CryptoTestamentLab"));
 const MiningPanel = lazy(() => import("./components/MiningPanel"));
 const Glossary = lazy(() => import("./components/Glossary"));
-
-// === NOVOS PAINÉIS: O Livro do ETRNET (Cap. 8-12) ===
 const CollapseAlgebraPanel = lazy(() => import("./components/CollapseAlgebraPanel"));
 const LSCPanel = lazy(() => import("./components/LSCPanel"));
 const AnacroclastiaPanel = lazy(() => import("./components/AnacroclastiaPanel"));
@@ -58,8 +58,6 @@ const PoWFaucetPanel = lazy(() => import("./components/PoWFaucetPanel"));
 const DoubleSpendDefenseLab = lazy(() => import("./components/DoubleSpendDefenseLab"));
 const AntiSybilLab = lazy(() => import("./components/AntiSybilLab"));
 const TemporalOracleLab = lazy(() => import("./components/TemporalOracleLab"));
-
-// === HEADLESS MODULES (Cap. 13) ===
 const QRNGPanel = lazy(() => import("./components/QRNGPanel"));
 const NostrOraclePanel = lazy(() => import("./components/NostrOraclePanel"));
 const SocialRecoveryPanel = lazy(() => import("./components/SocialRecoveryPanel"));
@@ -76,17 +74,13 @@ const OctreeSDFPanel = lazy(() => import("./components/OctreeSDFPanel"));
 const NostrSyncPanel = lazy(() => import("./components/NostrSyncPanel"));
 const GhostLockerPanel = lazy(() => import("./components/GhostLockerPanel"));
 const GPUMiningPanel = lazy(() => import("./components/GPUMiningPanel"));
-
-// === VOID MESSENGER (O Vetor de Infecção) ===
 const Messenger = lazy(() => import("./components/Messenger"));
-
-// === PHANTOM HARVESTER (Scraper Universal) ===
 const PhantomHarvesterPanel = lazy(() => import("./components/PhantomHarvesterPanel"));
 
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center h-32 text-zinc-600 font-mono text-xs">
-      <div className="animate-pulse">LOADING...</div>
+      <div className="animate-pulse">CARREGANDO...</div>
     </div>
   );
 }
@@ -101,79 +95,27 @@ function detectBrowser(): string {
 
 function BrowserWarning({ browser }: { browser: string }) {
   if (browser === "chrome" || browser === "edge") return null;
-
   const limitations: Record<string, string[]> = {
     firefox: ["Web Bluetooth", "Web Serial"],
     safari: ["Web Bluetooth", "Web Serial", "Web NFC"],
   };
-
   const missing = limitations[browser] || [];
   if (missing.length === 0) return null;
-
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 border-t border-yellow-500/30 px-4 py-2 text-xs font-mono text-yellow-400/80 flex items-center gap-2 backdrop-blur-sm">
       <span className="text-yellow-500">&#9888;</span>
-      <span>
-        Hardware local limitado ({missing.join(", ")}). Use Chrome para acesso completo ao HCN.
-      </span>
+      <span>Hardware local limitado ({missing.join(", ")}). Use Chrome para acesso completo ao HCN.</span>
     </div>
   );
 }
 
-export default function App() {
-  const [browser] = useState(detectBrowser);
-
-  useEffect(() => {
-    const isLocalDev =
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const isKnownRelayNoise = (reason: unknown): boolean => {
-      if (!(reason instanceof Error)) return false;
-      const msg = reason.message.toLowerCase();
-      return msg.includes("invalid: id is computed incorrectly")
-        || msg.includes("rate-limited")
-        || msg.includes("pow:");
-    };
-
-    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
-      if (!isLocalDev) return;
-      if (isKnownRelayNoise(event.reason)) {
-        event.preventDefault();
-      }
-    };
-
-    if (nativeBridge.isAvailable()) {
-      nativeBridge.activateCarrierService();
-    }
-    window.addEventListener("unhandledrejection", onUnhandledRejection);
-    if ("serviceWorker" in navigator) {
-      if (!isLocalDev) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker.register("/sw.js").then(() => {
-            console.log("[VØID] Service Worker registrado no Stratum 3.");
-          });
-        });
-      } else {
-        // Em dev, SW causa cache de chunks antigos e quebra HMR/hooks.
-        void navigator.serviceWorker.getRegistrations().then((registrations) => {
-          registrations.forEach((registration) => {
-            void registration.unregister();
-          });
-        });
-      }
-    }
-
-    return () => {
-      window.removeEventListener("unhandledrejection", onUnhandledRejection);
-    };
-  }, []);
-
+/** Landing page — the original scroll experience */
+function LandingPage() {
   return (
     <div className="scanlines noise min-h-screen text-zinc-300 selection:bg-[#b6ff3a] selection:text-black">
       <Nav />
       <main>
         <Suspense fallback={<LoadingFallback />}>
-          {/* === ORIGENS & CORE === */}
           <Hero />
           <Marquee />
           <Overview />
@@ -181,45 +123,29 @@ export default function App() {
           <ActiveTerminal />
           <CoreInnovations />
           <Onboarding />
-
-          {/* === CRYPTO LABS === */}
           <ZKPLab />
           <KarmaWalletPanel />
           <DEXPanel />
           <RwaTokenizationPanel />
           <StablecoinPanel />
           <SupplyChainSecurity />
-
-          {/* === REDE & TRANSPORTE === */}
           <DistanceBridge />
           <GhostVPNPanel />
           <ParasiticArchitecture />
           <SymbiontInoculator />
-
-          {/* === CAMADA 2: TECNOLOGIAS EMERGENTES === */}
           <EcoNetPanel />
           <MirageComputePanel />
           <AegisVaultPanel />
-
-          {/* === CAMADA 3: FINANÇAS SOBERANAS === */}
           <JanusFinancePanel />
           <ChimeraExchangePanel />
           <SovereignPoolsPanel />
-
-          {/* === CAMADA 4: PHANTOM SHOPPER === */}
           <PhantomShopperPanel />
           <PhantomHarvesterPanel />
-
-          {/* === GOVERNANÇA QUÂNTICA (PATH 3) === */}
           <QuantumDaoPanel />
           <PoWFaucetPanel />
-
-          {/* === LABS DE SEGURANÇA === */}
           <AntiSybilLab />
           <DoubleSpendDefenseLab />
           <TemporalOracleLab />
-
-          {/* === HYDRA & OMEGA === */}
           <Hydra />
           <Omega />
           <HGPUVisualizer />
@@ -227,27 +153,17 @@ export default function App() {
           <VhgpuFarmPanel />
           <LuaPluginPanel />
           <PaleoPanel />
-
-          {/* === O LIVRO DO ETRNET: MECÂNICA DOS COLAPSOS === */}
           <CollapseAlgebraPanel />
           <LSCPanel />
           <QRCTopologyPanel />
           <AnacroclastiaPanel />
-
-          {/* === O LIVRO DO ETRNET: FINANÇAS DE COLAPSO === */}
           <CollapseFinancePanel />
           <QRStocksPanel />
           <HomotopyMiningPanel />
           <AnimusSubstratesPanel />
-
-          {/* === VOID MESSENGER (Full-screen overlay) === */}
           <Messenger />
-
-          {/* === SOCIAL & PALEO === */}
           <SocialFabricPanel />
           <CryptoTestamentLab />
-
-          {/* === HEADLESS MODULES (Cap. 13) === */}
           <QRNGPanel />
           <NostrOraclePanel />
           <SocialRecoveryPanel />
@@ -264,8 +180,6 @@ export default function App() {
           <NostrSyncPanel />
           <GhostLockerPanel />
           <GPUMiningPanel />
-
-          {/* === INFRAESTRUTURA === */}
           <Guarantees />
           <Roadmap />
           <Manifesto />
@@ -273,7 +187,59 @@ export default function App() {
         </Suspense>
       </main>
       <Footer />
-      <BrowserWarning browser={browser} />
     </div>
+  );
+}
+
+export default function App() {
+  const [browser] = useState(detectBrowser);
+
+  useEffect(() => {
+    const isLocalDev =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    const isKnownRelayNoise = (reason: unknown): boolean => {
+      if (!(reason instanceof Error)) return false;
+      const msg = reason.message.toLowerCase();
+      return msg.includes("invalid: id is computed incorrectly") || msg.includes("rate-limited") || msg.includes("pow:");
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (!isLocalDev) return;
+      if (isKnownRelayNoise(event.reason)) event.preventDefault();
+    };
+
+    if (nativeBridge.isAvailable()) nativeBridge.activateCarrierService();
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+    if ("serviceWorker" in navigator) {
+      if (!isLocalDev) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").then(() => {
+            console.log("[VØID] Service Worker registrado no Stratum 3.");
+          });
+        });
+      } else {
+        void navigator.serviceWorker.getRegistrations().then((registrations) => {
+          registrations.forEach((r) => void r.unregister());
+        });
+      }
+    }
+
+    return () => window.removeEventListener("unhandledrejection", onUnhandledRejection);
+  }, []);
+
+  return (
+    <Router>
+      <Switch>
+        {/* Landing page at root */}
+        <Route path="/" component={LandingPage} />
+
+        {/* All panel routes use AppLayout with sidebar/bottombar */}
+        <Route path="/:rest*">
+          <AppLayout />
+        </Route>
+      </Switch>
+      <BrowserWarning browser={browser} />
+    </Router>
   );
 }

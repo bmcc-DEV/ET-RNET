@@ -170,3 +170,52 @@ body {
   text-transform: uppercase;
   color: #5a6268;
 }
+
+/* ── Mobile optimizations ── */
+
+/* Prevent pull-to-refresh on mobile */
+html {
+  overscroll-behavior: none;
+}
+
+/* Minimum touch target size (Apple HIG: 44px) */
+button, a, [role="button"] {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Prevent iOS Safari zoom on input focus */
+input, textarea, select {
+  font-size: 16px !important;
+}
+
+/* Safe area insets for notched devices */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Scrollbar thin for sidebar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #1a1f26;
+  border-radius: 2px;
+}
+
+/* Performance: isolate panel reflows */
+.panel-isolated {
+  contain: layout style;
+}
+
+/* Smooth page transitions */
+.page-enter {
+  animation: fadeIn 0.15s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

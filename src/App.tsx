@@ -15,7 +15,8 @@ import Roadmap from "./components/Roadmap";
 import Manifesto from "./components/Manifesto";
 import Footer from "./components/Footer";
 
-// All panel lazy imports are in router.tsx — loaded on demand per route
+// Lazy imports used directly in LandingPage
+const Glossary = lazy(() => import("./components/Glossary"));
 
 function LoadingFallback() {
   return (
@@ -114,7 +115,9 @@ function LandingPage() {
         <Guarantees />
         <Roadmap />
         <Manifesto />
-        <Glossary />
+        <Suspense fallback={null}>
+          <Glossary />
+        </Suspense>
       </main>
       <Footer />
     </div>

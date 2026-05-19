@@ -133,12 +133,8 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
-// Local simulated backend database in memory / Service Worker context
-let localPeers = [
-  { id: "peer_b8a3", name: "Alpha-Enclave", distance: "45m", type: "BLE", active: true },
-  { id: "peer_f901", name: "Substrato-XDP", distance: "120m", type: "UWB", active: true },
-  { id: "peer_11c4", name: "HCN-Carrier-09", distance: "1.2km", type: "HCN", active: true },
-];
+// Local peer list — populated dynamically from BroadcastChannel announcements
+let localPeers = [];
 
 let localSharedPool = [];
 

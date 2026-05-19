@@ -12,6 +12,7 @@
 import { voidOrchestrator } from "../core/VoidOrchestrator";
 import { secureRandomId } from "../utils/secureRandom";
 import { GhostIdentity } from "../crypto/ghostid";
+import { chatStore, type ChatMessage, type ChatThread } from "../storage/chatStore";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   type RatchetState,
@@ -256,6 +257,24 @@ export class SocialFabric {
 
       this.messages.set(threadId, thread);
       this.listeners.forEach(l => l(msg));
+
+      // Persist to IndexedDB for cross-session history
+      const myId = voidOrchestrator.getIdentity();
+      const myPkHex = myId
+        ? Array.from(myId.publicKey).map(b => b.toString(16).padStart(2, '0')).join('')
+        : '';
+      const direction: 'in' | 'out' = msg.senderPubKey === myPkHex ? 'out' : 'in';
+
+      chatStore.addMessage({
+        id: msg.id,
+        threadId,
+        senderPk: msg.senderPubKey,
+        content: msg.content,
+        encrypted: msg.content, // for DMs this is the ciphertext
+        timestamp: msg.timestamp,
+        status: 'delivered',
+        direction,
+      }).catch(err => console.warn('[SocialFabric] chatStore error:', err));
     }
   }
 
@@ -271,6 +290,27 @@ export class SocialFabric {
   /** Retorna nosso pre-key bundle para publicação */
   public getLocalBundle(): PreKeyBundle | null {
     return this.localBundle;
+  }
+
+  /**
+   * Carrega histórico de mensagens de uma thread a partir do chatStore (IndexedDB).
+   */
+  public async loadHistory(threadId: string, limit?: number): Promise<SocialMessage[]> {
+    const stored = await chatStore.getMessages(threadId, limit);
+    return stored.map(m => ({
+      id: m.id,
+      senderPubKey: m.senderPk,
+      recipientPubKey: threadId !== 'public_feed' ? threadId : undefined,
+      content: m.content,
+      timestamp: m.timestamp,
+    }));
+  }
+
+  /**
+   * Retorna a lista de threads persistidas no chatStore (IndexedDB).
+   */
+  public async getThreadList(): Promise<ChatThread[]> {
+    return chatStore.getThreads();
   }
 
   public subscribe(listener: (msg: SocialMessage) => void): () => void {

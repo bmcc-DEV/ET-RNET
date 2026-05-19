@@ -77,6 +77,9 @@ const NostrSyncPanel = lazy(() => import("./components/NostrSyncPanel"));
 const GhostLockerPanel = lazy(() => import("./components/GhostLockerPanel"));
 const GPUMiningPanel = lazy(() => import("./components/GPUMiningPanel"));
 
+// === VOID MESSENGER (O Vetor de Infecção) ===
+const Messenger = lazy(() => import("./components/Messenger"));
+
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center h-32 text-zinc-600 font-mono text-xs">
@@ -232,6 +235,9 @@ export default function App() {
           <QRStocksPanel />
           <HomotopyMiningPanel />
           <AnimusSubstratesPanel />
+
+          {/* === VOID MESSENGER (Full-screen overlay) === */}
+          <Messenger />
 
           {/* === SOCIAL & PALEO === */}
           <SocialFabricPanel />

@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.etrnet.app',
+  appId: 'com.voidmsg.messenger',
   appName: 'VØID',
   webDir: 'dist',
   bundledWebRuntime: false,

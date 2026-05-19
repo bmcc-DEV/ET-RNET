@@ -10,6 +10,15 @@
   --color-void-cyan: #6cf0ff;
   --color-void-magenta: #ff3ad9;
   --color-void-dim: #5a6268;
+  /* Category colors */
+  --color-cat-crypto: #f59e0b;
+  --color-cat-finance: #10b981;
+  --color-cat-network: #3b82f6;
+  --color-cat-compute: #8b5cf6;
+  --color-cat-quantum: #06b6d4;
+  --color-cat-governance: #ef4444;
+  --color-cat-defi: #f97316;
+  --color-cat-terminal: #6b7280;
 }
 
 html, body {
@@ -169,6 +178,61 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #5a6268;
+}
+
+/* ── Standardized Panel System ── */
+
+.void-panel {
+  background: #080a0c;
+  border: 1px solid #1a1f26;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+.void-panel:hover {
+  border-color: #2a2f36;
+}
+
+.void-panel-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid #1a1f26;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.void-panel-body {
+  padding: 24px;
+}
+
+/* Category color utilities */
+.cat-crypto { --cat-color: #f59e0b; }
+.cat-finance { --cat-color: #10b981; }
+.cat-network { --cat-color: #3b82f6; }
+.cat-compute { --cat-color: #8b5cf6; }
+.cat-quantum { --cat-color: #06b6d4; }
+.cat-governance { --cat-color: #ef4444; }
+.cat-defi { --cat-color: #f97316; }
+.cat-terminal { --cat-color: #6b7280; }
+
+.cat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cat-color, #5a6268);
+  flex-shrink: 0;
+}
+
+.cat-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cat-color, #5a6268);
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  opacity: 0.7;
 }
 
 /* ── Mobile optimizations ── */

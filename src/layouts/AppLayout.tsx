@@ -2,7 +2,8 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { Route, Switch } from "wouter";
 import Sidebar from "../components/Sidebar";
 import BottomBar from "../components/BottomBar";
-import { routes } from "../router";
+import PanelWrapper from "../components/PanelWrapper";
+import { routes, categoryColorMap, getCategoryById } from "../router";
 
 function LoadingFallback() {
   return (
@@ -42,11 +43,18 @@ export default function AppLayout({ children }: { children?: ReactNode }) {
       >
         <Suspense fallback={<LoadingFallback />}>
           <Switch>
-            {/* All panel routes */}
+            {/* All panel routes — each wrapped with PanelWrapper */}
             {routes.map((route) => (
               <Route key={route.path} path={route.path}>
                 <div className="p-4 md:p-6 max-w-7xl mx-auto">
-                  <route.component />
+                  <PanelWrapper
+                    title={route.label}
+                    category={route.category}
+                    icon={route.icon}
+                    description={route.description}
+                  >
+                    <route.component />
+                  </PanelWrapper>
                 </div>
               </Route>
             ))}

@@ -11,7 +11,6 @@ import Marquee from "./components/Marquee";
 import Overview from "./components/Overview";
 import Onboarding from "./components/Onboarding";
 import Guarantees from "./components/Guarantees";
-import Roadmap from "./components/Roadmap";
 import Manifesto from "./components/Manifesto";
 import Footer from "./components/Footer";
 
@@ -113,7 +112,6 @@ function LandingPage() {
         </section>
 
         <Guarantees />
-        <Roadmap />
         <Manifesto />
         <Suspense fallback={null}>
           <Glossary />
